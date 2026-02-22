@@ -1,7 +1,8 @@
 # nabla-flow
-# Whitebox-Grad 🧠
+Eine pädagogische Implementierung von Backpropagation "from scratch". Frei nachdem motto: AI verstehen für alle. 
 
-Eine pädagogische Implementierung von Backpropagation "from scratch".
+## Vorwissen:
+Es ist wichtig zu unterscheiden, dass die numerische Ableitung $f^\prime (x) = \lim_{h\rightarrow 0} \frac{f(x+h)-f(x)}{h}$ oder die regelbasierte Ableitung wie zB. $f^{\prime}(x)=nx^{n-1}$ und die Ableitung beim Machine-Learning nicht das gleiche ist. 
 
 ## 1. Das Konzept: Computational Graph
 
