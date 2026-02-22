@@ -1,0 +1,156 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Backpropagation from First Principles}
+\author{nabla-flow}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+This document derives reverse-mode automatic differentiation (backpropagation)
+from first principles for scalar loss functions
+\(L: \mathbb{R}^n \to \mathbb{R}\).
+
+\section{Derivative and partial derivative from limits}
+For \(f: \mathbb{R} \to \mathbb{R}\), the derivative at \(x\) is
+\begin{equation}
+  f'(x) = \lim_{h \to 0} \frac{f(x+h)-f(x)}{h}.
+\end{equation}
+
+For \(f: \mathbb{R}^n \to \mathbb{R}\), the \(i\)-th partial derivative is
+\begin{equation}
+  \frac{\partial f}{\partial x_i}(x)
+  = \lim_{h \to 0}
+  \frac{f(x_1,\dots,x_i+h,\dots,x_n)-f(x_1,\dots,x_n)}{h}.
+\end{equation}
+
+The gradient is
+\begin{equation}
+  \nabla f(x)
+  = \left(\frac{\partial f}{\partial x_1}(x),\dots,\frac{\partial f}{\partial x_n}(x)\right)^\top.
+\end{equation}
+
+\section{Computational graph and reverse accumulation}
+Assume a directed acyclic graph (DAG) with intermediate variables
+\(v_1,\dots,v_m\) and scalar output \(L\).
+Define the adjoint
+\begin{equation}
+  \bar v := \frac{\partial L}{\partial v}.
+\end{equation}
+
+If node \(u\) has direct successors \(w_1,\dots,w_r\), then by chain rule
+\begin{equation}
+  \bar u
+  = \frac{\partial L}{\partial u}
+  = \sum_{k=1}^{r} \frac{\partial L}{\partial w_k}\frac{\partial w_k}{\partial u}
+  = \sum_{k=1}^{r} \bar w_k\,\frac{\partial w_k}{\partial u}.
+\end{equation}
+
+This identity is the reverse accumulation rule.
+
+\section{Local derivatives from first principles}
+\subsection{Addition}
+Let \(z = x+y\).
+\begin{equation}
+  \frac{\partial z}{\partial x}
+  = \lim_{h\to0}\frac{(x+h)+y-(x+y)}{h} = 1,
+  \qquad
+  \frac{\partial z}{\partial y}=1.
+\end{equation}
+Backprop update:
+\begin{equation}
+  \bar x \mathrel{+}= \bar z,
+  \qquad
+  \bar y \mathrel{+}= \bar z.
+\end{equation}
+
+\subsection{Multiplication}
+Let \(z = xy\).
+\begin{equation}
+  \frac{\partial z}{\partial x}
+  = \lim_{h\to0}\frac{(x+h)y-xy}{h} = y,
+  \qquad
+  \frac{\partial z}{\partial y}=x.
+\end{equation}
+Backprop update:
+\begin{equation}
+  \bar x \mathrel{+}= \bar z\,y,
+  \qquad
+  \bar y \mathrel{+}= \bar z\,x.
+\end{equation}
+
+\subsection{Power with integer exponent}
+Let \(z=x^n\) with \(n\in\mathbb{N}\). Using the binomial theorem:
+\begin{align}
+  \frac{(x+h)^n-x^n}{h}
+  &= \frac{\sum_{k=0}^{n}\binom{n}{k}x^{n-k}h^k - x^n}{h} \\
+  &= nx^{n-1} + \sum_{k=2}^{n}\binom{n}{k}x^{n-k}h^{k-1}.
+\end{align}
+Taking \(h\to0\) eliminates all terms \(k\ge2\), so
+\begin{equation}
+  \frac{\partial z}{\partial x}=nx^{n-1},
+  \qquad
+  \bar x \mathrel{+}= \bar z\,nx^{n-1}.
+\end{equation}
+
+\section{Worked chain-rule example}
+Let
+\begin{equation}
+  L=(ab+c)d.
+\end{equation}
+Introduce intermediates
+\begin{equation}
+  u=ab,
+  \qquad
+  v=u+c,
+  \qquad
+  L=vd.
+\end{equation}
+
+Initialize \(\bar L=1\).
+\begin{align}
+  \bar v &= \bar L\frac{\partial L}{\partial v}=d, &
+  \bar d &= \bar L\frac{\partial L}{\partial d}=v, \\
+  \bar u &= \bar v\frac{\partial v}{\partial u}=d, &
+  \bar c &= \bar v\frac{\partial v}{\partial c}=d, \\
+  \bar a &= \bar u\frac{\partial u}{\partial a}=bd, &
+  \bar b &= \bar u\frac{\partial u}{\partial b}=ad.
+\end{align}
+Therefore
+\begin{equation}
+  \frac{\partial L}{\partial a}=bd,
+  \quad
+  \frac{\partial L}{\partial b}=ad,
+  \quad
+  \frac{\partial L}{\partial c}=d,
+  \quad
+  \frac{\partial L}{\partial d}=ab+c.
+\end{equation}
+
+\section{Finite-difference gradient check}
+For implementation validation only (not training), use central differences:
+\begin{equation}
+  \frac{\partial L}{\partial x_i}
+  \approx
+  \frac{L(x_i+\varepsilon)-L(x_i-\varepsilon)}{2\varepsilon},
+  \qquad
+  0<\varepsilon\ll1.
+\end{equation}
+
+\section{References}
+\begin{itemize}
+  \item M. Spivak, \textit{Calculus}.
+  \item W. Rudin, \textit{Principles of Mathematical Analysis}.
+  \item C. M. Bishop, \textit{Pattern Recognition and Machine Learning}.
+  \item I. Goodfellow, Y. Bengio, A. Courville, \textit{Deep Learning}.
+  \item J. Nocedal, S. J. Wright, \textit{Numerical Optimization}.
+\end{itemize}
+
+\end{document}
