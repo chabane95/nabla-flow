@@ -1,0 +1,9 @@
+src/*.c text
+src/*.h text
+data/*.txt text eol=lf
+data/*.tsv text eol=lf
+results/*.csv text eol=lf
+*.nfg binary
+*.png binary
+*.docx binary
+figures/*.svg text eol=lf whitespace=-trailing-space linguist-generated=true

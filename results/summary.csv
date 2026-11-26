@@ -1,0 +1,2 @@
+seed,steps,best_step,train_records,val_records,train_tokens,val_tokens,parameters,initial_val_nll,best_val_nll,bigram_val_nll,bigram_val_ppl,context,width,heads,layers,batch,peak_lr,eval_every,train_probe_blocks,train_probe_tokens
+42,1800,1000,248,56,10998,2496,35776,5.55346731407,0.237387028847,1.33747699572,3.8094201872,64,32,4,2,8,0.002,50,64,2833

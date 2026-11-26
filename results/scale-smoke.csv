@@ -1,0 +1,2 @@
+parameters,positions,sequence_tokens,updates,nll_before,nll_after,grad_norm
+124439808,1024,4,1,11.0519765,4.77931326,137.886076

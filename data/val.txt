@@ -1,0 +1,56 @@
+Links: rot. Rechts: rosa. Links ist rot.
+Links: rot. Rechts: rosa. Rechts ist rosa.
+Links: rosa. Rechts: rot. Links ist rosa.
+Links: rosa. Rechts: rot. Rechts ist rot.
+Fach A: Glas. Fach B: Blei. In A liegt Glas.
+Fach A: Glas. Fach B: Blei. In B liegt Blei.
+Fach A: Blei. Fach B: Glas. In A liegt Blei.
+Fach A: Blei. Fach B: Glas. In B liegt Glas.
+Links: blau. Rechts: rosa. Links ist blau.
+Links: blau. Rechts: rosa. Rechts ist rosa.
+Links: rosa. Rechts: blau. Links ist rosa.
+Links: rosa. Rechts: blau. Rechts ist blau.
+Fach A: Holz. Fach B: Blei. In A liegt Holz.
+Fach A: Holz. Fach B: Blei. In B liegt Blei.
+Fach A: Blei. Fach B: Holz. In A liegt Blei.
+Fach A: Blei. Fach B: Holz. In B liegt Holz.
+Links: grün. Rechts: lila. Links ist grün.
+Links: grün. Rechts: lila. Rechts ist lila.
+Links: lila. Rechts: grün. Links ist lila.
+Links: lila. Rechts: grün. Rechts ist grün.
+Fach A: Sand. Fach B: Erde. In A liegt Sand.
+Fach A: Sand. Fach B: Erde. In B liegt Erde.
+Fach A: Erde. Fach B: Sand. In A liegt Erde.
+Fach A: Erde. Fach B: Sand. In B liegt Sand.
+Links: gelb. Rechts: rosa. Links ist gelb.
+Links: gelb. Rechts: rosa. Rechts ist rosa.
+Links: rosa. Rechts: gelb. Links ist rosa.
+Links: rosa. Rechts: gelb. Rechts ist gelb.
+Fach A: Kork. Fach B: Blei. In A liegt Kork.
+Fach A: Kork. Fach B: Blei. In B liegt Blei.
+Fach A: Blei. Fach B: Kork. In A liegt Blei.
+Fach A: Blei. Fach B: Kork. In B liegt Kork.
+Links: gelb. Rechts: braun. Links ist gelb.
+Links: gelb. Rechts: braun. Rechts ist braun.
+Links: braun. Rechts: gelb. Links ist braun.
+Links: braun. Rechts: gelb. Rechts ist gelb.
+Fach A: Kork. Fach B: Harz. In A liegt Kork.
+Fach A: Kork. Fach B: Harz. In B liegt Harz.
+Fach A: Harz. Fach B: Kork. In A liegt Harz.
+Fach A: Harz. Fach B: Kork. In B liegt Kork.
+Links: weiß. Rechts: braun. Links ist weiß.
+Links: weiß. Rechts: braun. Rechts ist braun.
+Links: braun. Rechts: weiß. Links ist braun.
+Links: braun. Rechts: weiß. Rechts ist weiß.
+Fach A: Gold. Fach B: Harz. In A liegt Gold.
+Fach A: Gold. Fach B: Harz. In B liegt Harz.
+Fach A: Harz. Fach B: Gold. In A liegt Harz.
+Fach A: Harz. Fach B: Gold. In B liegt Gold.
+Links: lila. Rechts: beige. Links ist lila.
+Links: lila. Rechts: beige. Rechts ist beige.
+Links: beige. Rechts: lila. Links ist beige.
+Links: beige. Rechts: lila. Rechts ist lila.
+Fach A: Erde. Fach B: Ton. In A liegt Erde.
+Fach A: Erde. Fach B: Ton. In B liegt Ton.
+Fach A: Ton. Fach B: Erde. In A liegt Ton.
+Fach A: Ton. Fach B: Erde. In B liegt Erde.
