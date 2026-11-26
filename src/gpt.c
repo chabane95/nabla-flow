@@ -610,12 +610,12 @@ static int test_gradients(Gpt *model)
         double err = fabs(numerical-analytical);
         if (!isfinite(numerical) || !isfinite(analytical) ||
             err > 2e-4 + 0.004*fmax(fabs(numerical), fabs(analytical))) {
-            fprintf(stderr,"Gradient %zu: analytisch %.8g, numerisch %.8g\n",i,analytical,numerical);
+            fprintf(stderr,"Gradient %zu: analytical %.8g, numerical %.8g\n",i,analytical,numerical);
             return 0;
         }
         if (err > max_error) max_error = err;
     }
-    printf("Gradiententest: %zu Parameter, maximale absolute Abweichung %.3g.\n",
+    printf("Gradient check: %zu parameters, maximum absolute error %.3g.\n",
            model->parameter_count, max_error);
     return 1;
 }
@@ -671,19 +671,19 @@ int gpt_selftest(void)
     Gpt model = {0};
     GptConfig tiny = {11,5,6,2,2}, full = {50257,1024,768,12,12};
     if (gpt_parameter_count(full) != 124439808 || !gpt_init(&model,tiny,17)) {
-        fprintf(stderr,"Modellform oder Initialisierung fehlgeschlagen.\n");
+        fprintf(stderr,"Unexpected parameter count or model initialization failed.\n");
         return 0;
     }
     /* Less symmetric logits make query/key derivatives large enough to test
        with finite differences at float32 precision. */
     for (size_t i = 0; i < model.state->matrices; ++i) model.parameters[i] *= 12.0f;
     int ok = 0;
-    if (!test_causality(&model)) fprintf(stderr,"Kausalitaetstest fehlgeschlagen.\n");
-    else if (!test_gradients(&model)) fprintf(stderr,"Gradiententest fehlgeschlagen.\n");
-    else if (!test_optimizer(&model)) fprintf(stderr,"AdamW-/Clipping-Test fehlgeschlagen.\n");
-    else if (!test_stable_loss(&model)) fprintf(stderr,"Softmax-Test fehlgeschlagen.\n");
+    if (!test_causality(&model)) fprintf(stderr,"Causality check failed.\n");
+    else if (!test_gradients(&model)) fprintf(stderr,"Gradient check failed.\n");
+    else if (!test_optimizer(&model)) fprintf(stderr,"AdamW or gradient clipping check failed.\n");
+    else if (!test_stable_loss(&model)) fprintf(stderr,"Softmax stability check failed.\n");
     else {
-        puts("Kausale Maske, Prefix-Logits, Softmax, Token-Mittelung, Clipping und AdamW geprueft.");
+        puts("Causal mask, prefix logits, softmax, per-token averaging, clipping, and AdamW: OK");
         ok = 1;
     }
     gpt_free(&model);

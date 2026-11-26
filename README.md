@@ -1,46 +1,46 @@
 # nabla-flow
 
-Wie weit kommt GPT-2 auf einer einzelnen RTX 4070 SUPER, wenn man mit zufälligen Gewichten und gut einem Megabyte Shakespeare anfängt? Für diesen Versuch läuft der Decoder in C und CUDA. Er hat die 124.439.808 Parameter von GPT-2 Small. Vor dem ersten Update und danach alle 100 Schritte bekommt er denselben Redeanfang, `ROMEO:` mit einem Zeilenumbruch.
-
-Nach 2.400 Schritten steht da diese Zeile.
+Before the first update, my GPT-2 Small model followed `ROMEO:` with ` Arsenal stained slap`. After 2,400 updates on *Tiny Shakespeare*, the same prompt produced a one-line speech.
 
 ```text
 ROMEO:
 Now, that is the time of me to hear.
 ```
 
-Ab **Now** ist alles generiert. Nach der Leerzeile hat das Modell selbst das Ende der Rede gesetzt. Am Anfang des Trainings stand an derselben Stelle noch ` Arsenal stained slap`. Was mich an der letzten Zeile interessiert, ist das holprige *the time of me to hear*. Der Anfang funktioniert gesprochen ganz gut. Gegen Ende passen die Wörter nur noch ungefähr zusammen. Die längste wörtliche Übereinstimmung mit einer Trainingsrede ist `, that is`, gerade mal drei Token. [Alle 25 Textproben mit Token-IDs und Fundstellen](results/gpt2-124m/samples-report.json)
+I supplied the speaker's name and the line break. The model wrote the rest, down to the blank line and the end-of-text token. Read it aloud and the opening sounds plausible. Then you get to *the time of me to hear*. I wanted to know whether it had lifted the line from a play. The longest exact match in any training speech was just three GPT-2 tokens, `, that is`. [All 25 samples and their matches](results/gpt2-124m/samples-report.json)
 
-## Was in den zwei Minuten passiert
+## Two minutes on a 4070 SUPER
 
-[![Links der Verlust auf festen Trainingsfenstern und auf der Validierung. Rechts die Validierungs-Perplexität über den verarbeiteten Zieltoken.](results/gpt2-124m/training.png)](results/gpt2-124m/training.svg)
+This is a C and CUDA implementation of GPT-2 Small, trained from random weights. It has 12 transformer blocks, 12 attention heads per block and 124,439,808 parameters. The place I cut back for a 12 GB card was context length. The model has room for 1,024 positions, but each training window uses only the first 128.
 
-Nach 400 Updates ist der größte Sprung in der Kurve schon vorbei. Zu diesem Zeitpunkt schreibt das Modell `But I will I have thy good that I have not`. Man hört den Tonfall, aber schon bei *will I have* verliert sich der Satz. Bei jeder Textprobe sind Temperatur, Top-k und Zufallsseed gleich. So kann man beim Lesen verfolgen, was sich mit den Gewichten ändert. [Training als Animation](results/gpt2-124m/training.gif) · [Messwerte der Abbildung](results/gpt2-124m/history.csv)
+Each update draws four windows from the training text. That works out to 1,228,800 next-token predictions over the run. There are only 311,356 tokens in the training split, so the model sees many of the same passages several times. The last validation measurement came 121 seconds into the run. [Build, train, or try another prompt](docs/training-124m.md)
 
-Pro Update zieht der Trainer vier Fenster zu je 128 Token. Nach 2.400 Updates sind das 1.228.800 Vorhersagen. Der Trainingsabschnitt selbst enthält nur 311.356 Token. Viele Stellen kommen also mehrmals dran. Das kurze Fenster ist auch die Stelle, an der ich für den eigenen Rechner gespart habe. Alle zwölf Transformerblöcke werden trainiert, von den 1.024 möglichen Positionen sieht das Modell während des Trainings nur die ersten 128. Bis zur letzten Validierung vergingen auf der 12-GB-Karte 121 Sekunden. [Lauf wiederholen oder einen eigenen Prompt eingeben](docs/training-124m.md)
+[![Training and validation loss against optimizer steps, alongside validation perplexity against the number of training tokens processed.](results/gpt2-124m/training.png)](results/gpt2-124m/training.svg)
 
-## Wie gut sagt es fremden Text voraus?
+By step 400 most of the initial drop in loss is already over. At that point Romeo opens with `But I will I have thy good that I have not`. The model has picked up *thy* and the rhythm of a speech, but loses the thread at *will I have*. Every sample uses the same prompt, temperature, top-k and random seed. [Watch the run](results/gpt2-124m/training.gif) · [Measurements behind the figure](results/gpt2-124m/history.csv)
 
-361 ganze Reden sind für die Validierung reserviert. Der Trainer sieht sie alle 100 Schritte und misst, wie viel Wahrscheinlichkeit das Modell den tatsächlich folgenden Token gibt. Die Gewichte werden dabei nur gelesen. Schritt 2.400 hat den niedrigsten mittleren Verlust. Erst mit diesen gespeicherten Gewichten kommt der Test auf den letzten 362 Reden.
+## How well does it predict a speech it hasn't seen?
 
-| Modell und Textabschnitt | Vorhergesagte Token | Verlust in Nat pro Token | Perplexität |
+I kept 361 whole speeches for validation and the last 362 for the test. The trainer measures validation loss every 100 updates. Step 2,400 had the lowest loss, so those are the weights used for the test.
+
+| Model and split | Next tokens scored | Loss (nats/token) | Perplexity |
 | --- | ---: | ---: | ---: |
-| GPT-2, Validierung | 13.106 | 4,145 | 63,10 |
-| GPT-2, Test | 13.564 | 5,171 | 176,05 |
-| Unigramm, derselbe Test | 13.564 | 6,684 | 799,28 |
+| GPT-2, validation | 13,106 | 4.145 | 63.10 |
+| GPT-2, test | 13,564 | 5.171 | 176.05 |
+| Unigram, same test | 13,564 | 6.684 | 799.28 |
 
-Das Unigramm zählt, wie häufig jedes Token im Training vorkommt. Nach `my` gibt es dieselben Wahrscheinlichkeiten aus wie nach `ROMEO:`. Der Abstand von 799 zu 176 zeigt, was der Decoder auf diesem Text gegenüber der reinen Häufigkeitszählung gewinnt. Perplexität ist hier `exp(mittlerer Verlust)`, gerechnet mit dem GPT-2-Tokenizer. [Testmessung](results/gpt2-124m/test.csv) · [Unigramm-Messung](results/gpt2-124m/unigram-test.csv)
+The unigram baseline counts tokens in the training text. It gives the same odds for the next token after `my` as it does after `ROMEO:`. On the same test passages, conditioning on the preceding text brings perplexity down from 799 to 176. Here perplexity is the exponential of the mean loss per GPT-2 token. [GPT-2 test result](results/gpt2-124m/test.csv) · [Unigram result](results/gpt2-124m/unigram-test.csv)
 
-Warum liegen Validierung und Test so weit auseinander? Ein Unterschied fällt beim Lesen auf. Die Reden bleiben in der Reihenfolge der Vorlage. In der Validierung tragen 86 von 361 Reden eine Sprecherangabe, die im Training fehlt. Im Test sind es 290 von 362, darunter Prospero und Miranda. Wie viel vom höheren Verlust auf die Namen selbst entfällt, wäre eine eigene Messung. [Aufteilung von Tiny Shakespeare](results/gpt2-124m/data.json)
+Why the jump from 63 on validation to 176 on the test? The split follows the order of the plays. In validation, 86 of 361 speeches have a speaker heading that never appears in training. In the test it's 290 of 362, including speeches by Prospero and Miranda. To find out how much the names themselves cost, I'd have to score the headings and the lines separately. [Corpus and split counts](results/gpt2-124m/data.json)
 
-## Zwei Stellen im Code
+## Two things worth checking in the code
 
-Beim Lesen würde ich mit der kausalen Maske anfangen. Für die Vorhersage hinter `Now,` darf der Attention-Kopf die Wörter rechts vom Komma noch nicht kennen. Das lässt sich direkt prüfen. Man tauscht das Ende der Eingabe aus und vergleicht die Ausgaben vor der Änderung. Im skalaren C-Kern müssen die früheren Logits Bit für Bit gleich bleiben. Im kleineren Byte-Modell kann man sich die berechneten Gewichte für ein kurzes Beispiel auch als Matrix ansehen. [C-Kern und Maskentest](src/gpt.c) · [Animierte Attention-Matrix](figures/attention.gif) · [Vaswani et al., Abschnitt 3.2](https://arxiv.org/abs/1706.03762)
+**Can an attention head see the answer?** When the input starts with `Now,`, changing everything to the right of the comma should leave the predictions up to that point alone. The CPU test makes exactly that edit and compares the earlier logits bit for bit. For a short input to the byte model, you can also look at the weights of one head, one row at a time. [C implementation and causality test](src/gpt.c) · [Attention animation](figures/attention.gif) · [Vaswani et al., section 3.2](https://arxiv.org/abs/1706.03762)
 
-Die zweite Stelle ist die Tokenmatrix. GPT-2 benutzt sie zweimal, am Eingang zum Nachschlagen eines Tokenvektors und am Ausgang für die 50.257 möglichen nächsten Token. Beim Rückwärtsrechnen bekommt dieselbe Matrix deshalb Gradienten aus beiden Verwendungen. Man kann das am kleinen Netz mit finiten Differenzen für jeden Parameter prüfen. Auf der GPU übernimmt cuBLAS die Matrixprodukte. Die Kernel für Attention, Normalisierung und AdamW stehen hier im Projekt. [GPU-Code](src/gpu.c) · [CUDA-Kernel](src/gpu_kernels.cu) · [Parameterzahl nachrechnen](docs/gpt2-small.md) · [GPT-2-Bericht](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+**Where does the token embedding get its gradient?** GPT-2 uses the same matrix to look up the input tokens and to score all 50,257 possible outputs. Both uses contribute to its gradient. On a small decoder, `nablaflow check` compares every parameter's gradient against a finite difference. On the GPU, cuBLAS handles the matrix products. The attention, normalization and AdamW kernels are in the repository. [GPU implementation](src/gpu.c) · [CUDA kernels](src/gpu_kernels.cu) · [Parameter count](docs/gpt2-small.md) · [Original GPT-2 report](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 
-## Zum Nachrechnen
+## Starting with the smaller models
 
-Die beiden kleinen Decoder lassen sich direkt aus dem Repository auf der CPU ausprobieren. Beim Labormodell reicht dafür eine Zeile. Auf `Fach A: Glas. Fach B: Harz. In B liegt ` folgt ausgerechnet `Glas.`. Der Satzbau sitzt, die Zuordnung geht schief. Deshalb zählt der Versuch neben der Perplexität auch die vollständig richtigen Antworten. Es sind 26 von 56. [Byte-Modelle bauen und ausprobieren](docs/byte-modelle.md) · [Kleiner Shakespeare-Versuch](results/shakespeare/README.md)
+Both byte models run on a CPU and ship with trained weights. One learns from short German lab notes. The prompt `Fach A: Glas. Fach B: Harz. In B liegt ` puts glass in compartment A and resin in B, then asks what's in B. The model answers `Glas.` and gets the grammar right while picking the wrong compartment. That's why this experiment also scores whole answers. It gets 26 out of 56 right. [Build and try the byte models](docs/byte-models.md) · [The smaller Shakespeare run](results/shakespeare/README.md)
 
-Das Lernheft fängt bei einem einzelnen Gewicht an. Der Weg zur Attention führt über den Gradienten der Softmax-Regression, den man bei Andrew Ng auf Papier nachrechnen kann. Für den Übergang vom Bigramm zum Decoder und für die 124M-Konfiguration waren die beiden Vorlesungen von Andrej Karpathy die Vorlage. [Lernheft für Word](docs/Lernheft.docx?raw=1) · [Eigene Ableitungen im LaTeX-Skript](latex/backprop_first_principles.tex) · [CS229-Notizen](https://cs229.stanford.edu/notes2022fall/main_notes.pdf) · [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY&t=535s) · [Let's reproduce GPT-2](https://www.youtube.com/watch?v=l8pRSuU81PU)
+The workbook starts with one weight and a derivative you can check on paper. It follows that calculation through softmax regression to one row of attention. Andrew Ng's CS229 notes are the reference for the regression step. Andrej Karpathy's two lectures give the progression from a bigram model to a decoder and then to the 124M configuration. [Workbook](docs/workbook.docx?raw=1) · [Backpropagation derivation](latex/backprop_first_principles.tex) · [CS229 notes](https://cs229.stanford.edu/notes2022fall/main_notes.pdf) · [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY&t=535s) · [Let's reproduce GPT-2](https://www.youtube.com/watch?v=l8pRSuU81PU)

@@ -11,441 +11,324 @@
 \newcommand{\T}{\mathsf{T}}
 \DeclareMathOperator{\diag}{diag}
 
-\title{Backpropagation aus First Principles}
+\title{Backpropagation from first principles}
 \author{nabla-flow}
 \date{}
 
 \begin{document}
 \maketitle
 
-\section{Ziel und Setup}
-Wir leiten Backpropagation (Reverse-Mode Automatic Differentiation) systematisch
-aus Grenzwertdefinitionen und der totalen Ableitung her.
-Der Fokus ist eine skalare Loss-Funktion
-\[
-L:\R^n\to\R.
-\]
-Wir betrachten erst die allgemeine Rechenregel auf Computational Graphs, danach
-die konkrete Form fuer neuronale Netze (ein Neuron, zwei Schichten, $K$ Schichten, Mini-Batch).
+\section{The derivative we need}
+A network with $n$ parameters and a scalar loss defines a function $L:\R^n\to\R$.
+A forward pass gives one value of $L$. A reverse pass computes all $n$ entries
+of its gradient from the intermediate values used in that forward pass.
+We start with the chain rule, then work through one neuron, a two-layer
+network and a mini-batch.
 
-\section{First Principles der Differentialrechnung}
-\subsection{Ableitung in einer Variablen}
-Fuer $f:\R\to\R$ ist die Ableitung in $x$ per Grenzwert
+\section{Derivatives as linear maps}
+\subsection{One variable}
+For $f:\R\to\R$, the derivative at $x$, when it exists, is
 \[
 f'(x)=\lim_{h\to 0}\frac{f(x+h)-f(x)}{h}.
 \]
 
-\subsection{Partielle Ableitung und Gradient}
-Fuer $f:\R^d\to\R$:
+\subsection{Partial derivatives and the gradient}
+For $f:\R^d\to\R$, varying just coordinate $i$ gives
 \[
 \frac{\partial f}{\partial x_i}(x)=
-\lim_{h\to 0}\frac{f(x_1,\ldots,x_i+h,\ldots,x_d)-f(x)}{h},
+\lim_{h\to 0}\frac{f(x_1,\ldots,x_i+h,\ldots,x_d)-f(x)}{h}.
 \]
+We collect these derivatives in a column vector,
 \[
 \nabla f(x)=
-\left(
-\frac{\partial f}{\partial x_1}(x),\ldots,\frac{\partial f}{\partial x_d}(x)
-\right)^\T.
+\left(\frac{\partial f}{\partial x_1}(x),\ldots,
+      \frac{\partial f}{\partial x_d}(x)\right)^\T.
 \]
 
-\subsection{Totale Ableitung als lineare Approximation}
-Die \emph{totale Ableitung} von $f:\R^d\to\R^m$ in $x$ ist die lineare Abbildung
-$Df(x):\R^d\to\R^m$ mit
+\subsection{The total derivative}
+A differentiable function $f:\R^d\to\R^m$ has a linear approximation
+$Df(x):\R^d\to\R^m$ satisfying
 \[
-f(x+h)=f(x)+Df(x)[h]+r(h),
-\qquad
+f(x+h)=f(x)+Df(x)[h]+r(h),\qquad
 \frac{\|r(h)\|}{\|h\|}\xrightarrow[h\to 0]{}0.
 \]
-Fuer skalare Ausgabe ($m=1$) gilt
-\[
-Df(x)[h]=\nabla f(x)^\T h.
-\]
-Diese Schreibweise ist die saubere Bruecke zwischen Analysis und Backprop:
-Backprop propagiert koeffizientenweise genau diese linearen Terme.
+For a scalar output, $Df(x)[h]=\nabla f(x)^\T h$. In particular, the
+coefficient of a change in one input tells us its first-order effect
+on the loss.
 
-\subsection{Kettenregel in Differentialform}
-Seien $u:\R^d\to\R^m$ und $v:\R^m\to\R^p$, dann
+\subsection{The chain rule}
+Let $u:\R^d\to\R^m$ and $v:\R^m\to\R^p$ be differentiable. Then
 \[
 D(v\circ u)(x)=Dv(u(x))\circ Du(x).
 \]
-Fuer skalare Ausgabe $p=1$:
+For $p=1$, writing the gradients as columns gives
 \[
 \nabla (v\circ u)(x)=Du(x)^\T\nabla v(u(x)).
 \]
-Genau diese Transponierung eines Jacobians im Rueckwaertsschritt ist die Kernidee
-von Reverse-Mode AD.
+A reverse pass multiplies an output gradient by the transpose of a local
+Jacobian. It can compute that product without building the Jacobian explicitly.
 
-\section{Vom Differential zur Reverse-Accumulation auf Graphen}
-\subsection{Graph-Modell}
-Ein gerichteter azyklischer Graph (DAG) habe Knoten $v_1,\ldots,v_m$ mit
-Endknoten $v_m=L$.
-Jeder Nicht-Input-Knoten entsteht aus seinen Eltern:
+\section{Reverse accumulation on a graph}
+\subsection{Values on the forward pass}
+Number the scalar nodes of a directed acyclic graph in topological order
+$v_1,\ldots,v_m$, with $v_m=L$. Each non-input node computes a function
+of values already available,
 \[
 v_j=\phi_j\!\left(v_{p_1(j)},\ldots,v_{p_{r_j}(j)}\right).
 \]
-Definiere die Adjungierte
-\[
-\bar v_i := \frac{\partial L}{\partial v_i}.
-\]
+The adjoint $\bar v_i=\partial L/\partial v_i$ measures how the loss changes
+when we perturb node $i$ and recompute its descendants.
 
-\subsection{Herleitung der Rueckwaertsformel}
-Nach totaler Differentiation jedes Knotens:
+\subsection{Accumulating an adjoint}
+The differential of a non-input node is
 \[
-\dd v_j=\sum_{i\in \mathrm{Pa}(j)}
+\dd v_j=\sum_{i\in\mathrm{Pa}(j)}
 \frac{\partial v_j}{\partial v_i}\,\dd v_i.
 \]
-Da $L=v_m$ und damit $\dd L=\sum_{j=1}^m \bar v_j\,\dd v_j$, folgt
-\begin{align}
-\dd L
-&=
-\sum_{j=1}^m
-\bar v_j
-\sum_{i\in\mathrm{Pa}(j)}
-\frac{\partial v_j}{\partial v_i}\,\dd v_i \\
-&=
-\sum_{i=1}^m
-\left(
-\sum_{j\in\mathrm{Ch}(i)}
-\bar v_j\,\frac{\partial v_j}{\partial v_i}
-\right)\dd v_i.
-\end{align}
-Koeffizientenvergleich von $\dd v_i$ liefert:
+Start with $\dd L=1\cdot\dd v_m$. Visit nodes in reverse order. When we
+reach $j$, the current expression contains $\bar v_j\,\dd v_j$.
+Substituting the local differential adds
+$\bar v_j\,\partial v_j/\partial v_i$ to the coefficient of each parent's
+differential. Once every child of $i$ has contributed, that coefficient is
 \[
-\boxed{
-\bar v_i=
-\sum_{j\in\mathrm{Ch}(i)}
-\bar v_j\,
-\frac{\partial v_j}{\partial v_i}
-}
+\boxed{\displaystyle
+\bar v_i=\sum_{j\in\mathrm{Ch}(i)}\bar v_j\,
+\frac{\partial v_j}{\partial v_i}}
+\qquad (i\ne m),\qquad \bar v_m=1.
 \]
-mit Startwert $\bar L=1$.
-Das ist Reverse-Accumulation bzw. Backpropagation in voller Allgemeinheit.
+The addition matters whenever a value is used in more than one place.
 
-\subsection{Komplexitaetsintuition}
-Jede Kante wird im Rueckwaertspass genau einmal benutzt.
-Ist die lokale Ableitung pro Kante $O(1)$, dann ist der Backward-Pass
-linear in der Graphgroesse (typisch $O(|E|)$), also gleicher Ordnungsgrad wie
-der Forward-Pass.
+\subsection{Cost of the reverse pass}
+The reverse pass visits each edge once. If its local derivative costs
+$O(1)$ and the forward values have been saved, the work is $O(|V|+|E|)$
+for this scalar graph.
 
-\section{Lokale Ableitungen aus Grenzwerten}
+\section{Local derivatives from limits}
 \subsection{Addition}
-Sei $z=x+y$.
+Let $z=x+y$. Then
 \[
 \frac{\partial z}{\partial x}
-=
-\lim_{h\to0}\frac{(x+h)+y-(x+y)}{h}=1,
-\qquad
+=\lim_{h\to0}\frac{(x+h)+y-(x+y)}{h}=1,\qquad
 \frac{\partial z}{\partial y}=1.
 \]
-Rueckwaerts:
+The two reverse updates are
 \[
-\bar x \mathrel{+}= \bar z,
-\qquad
-\bar y \mathrel{+}= \bar z.
+\bar x \mathrel{+}= \bar z,\qquad \bar y \mathrel{+}= \bar z.
 \]
 
-\subsection{Multiplikation}
-Sei $z=xy$.
+\subsection{Multiplication}
+For $z=xy$,
 \[
 \frac{\partial z}{\partial x}
-=
-\lim_{h\to0}\frac{(x+h)y-xy}{h}=y,
-\qquad
+=\lim_{h\to0}\frac{(x+h)y-xy}{h}=y,\qquad
 \frac{\partial z}{\partial y}=x.
 \]
-Rueckwaerts:
+This gives
 \[
-\bar x \mathrel{+}= \bar z\,y,
-\qquad
-\bar y \mathrel{+}= \bar z\,x.
+\bar x \mathrel{+}= \bar z\,y,\qquad \bar y \mathrel{+}= \bar z\,x.
 \]
 
-\subsection{Potenz mit ganzzahligem Exponenten}
-Sei $z=x^n$, $n\in\mathbb{N}$.
-\begin{align}
+\subsection{Integer powers}
+For $z=x^n$ and an integer $n\geq 1$, expand the numerator:
+\begin{align*}
 \frac{(x+h)^n-x^n}{h}
-&=
-\frac{\sum_{k=0}^{n}\binom{n}{k}x^{n-k}h^k-x^n}{h} \\
-&=
-nx^{n-1}
-\;+\;
-\sum_{k=2}^{n}\binom{n}{k}x^{n-k}h^{k-1}.
-\end{align}
-Fuer $h\to0$ verschwinden alle Terme $k\ge 2$:
+&=\frac{\sum_{k=0}^{n}\binom{n}{k}x^{n-k}h^k-x^n}{h}\\
+&=nx^{n-1}+\sum_{k=2}^{n}\binom{n}{k}x^{n-k}h^{k-1}.
+\end{align*}
+The terms with $k\geq2$ vanish as $h\to0$. Hence
 \[
-\frac{\partial z}{\partial x}=nx^{n-1},
-\qquad
-\bar x \mathrel{+}= \bar z\,n x^{n-1}.
+\frac{\partial z}{\partial x}=nx^{n-1},\qquad
+\bar x\mathrel{+}=\bar z\,n x^{n-1}.
 \]
 
-\subsection{Affiner Knoten}
-Fuer $z=w^\T x+b$ gilt
+\subsection{An affine function}
+For $z=w^\T x+b$,
 \[
-\dd z = x^\T \dd w + w^\T \dd x + \dd b.
+\dd z=x^\T\dd w+w^\T\dd x+\dd b.
 \]
-Damit (bei festem Input $x$) direkt:
+Reading off the coefficients gives
 \[
-\frac{\partial z}{\partial w}=x,\qquad
-\frac{\partial z}{\partial b}=1,\qquad
-\frac{\partial z}{\partial x}=w.
+\nabla_w z=x,\qquad \frac{\partial z}{\partial b}=1,\qquad \nabla_x z=w.
 \]
 
-\section{Langsame Herleitung: ein Neuron}
-Modell:
+\section{One neuron}
+Consider an activation $\sigma$, target $y$ and squared error
 \[
-z=w^\T x+b,\qquad
-a=\sigma(z),\qquad
-L=\frac{1}{2}(a-y)^2.
+z=w^\T x+b,\qquad a=\sigma(z),\qquad L=\tfrac12(a-y)^2.
 \]
 
-\subsection{Schritt 1: Loss nach Output}
-\[
-\frac{\partial L}{\partial a}=a-y.
-\]
+\subsection{From loss to output}
+Differentiating the square gives $\partial L/\partial a=a-y$.
 
-\subsection{Schritt 2: Output nach Praeaktivierung}
+\subsection{From output to preactivation}
+Since $\partial a/\partial z=\sigma'(z)$, the chain rule gives
 \[
-\frac{\partial a}{\partial z}=\sigma'(z).
-\]
-Also
-\[
-\frac{\partial L}{\partial z}
-=
-\frac{\partial L}{\partial a}\frac{\partial a}{\partial z}
+\delta:=\frac{\partial L}{\partial z}
+=\frac{\partial L}{\partial a}\frac{\partial a}{\partial z}
 =(a-y)\sigma'(z).
 \]
-Setze
-\[
-\delta:=\frac{\partial L}{\partial z}.
-\]
 
-\subsection{Schritt 3: Praeaktivierung nach Parametern}
-\[
-\frac{\partial z}{\partial w}=x,\qquad
-\frac{\partial z}{\partial b}=1,\qquad
-\frac{\partial z}{\partial x}=w.
-\]
+\subsection{From preactivation to parameters}
+The affine step has local derivatives $\nabla_w z=x$,
+$\partial z/\partial b=1$ and $\nabla_x z=w$.
 
-\subsection{Schritt 4: Kettenregel fertig ausmultiplizieren}
+\subsection{Putting the factors together}
+Each local derivative is multiplied by the same incoming scalar $\delta$,
 \[
-\nabla_w L
-=
-\frac{\partial L}{\partial z}\frac{\partial z}{\partial w}
-=
-\delta x,
+\nabla_w L=\delta x,\qquad
+\frac{\partial L}{\partial b}=\delta,\qquad
+\nabla_x L=\delta w.
 \]
-\[
-\frac{\partial L}{\partial b}
-=
-\delta,
-\]
-\[
-\nabla_x L
-=
-\delta w.
-\]
-Das ist bereits Backprop auf dem kleinsten nichttrivialen Netz.
+The last term is what an earlier layer would receive.
 
-\section{Langsame Herleitung: zweischichtiges MLP}
-Wir schreiben das Netz als
-\begin{align}
-z^{[1]} &= W^{[1]}x+b^{[1]}, &
-a^{[1]} &= \sigma\!\left(z^{[1]}\right), \\
-z^{[2]} &= W^{[2]}a^{[1]}+b^{[2]}, &
-a^{[2]} &= g\!\left(z^{[2]}\right), \\
+\section{A two-layer network}
+Write the forward pass as
+\begin{align*}
+z^{[1]} &= W^{[1]}x+b^{[1]}, & a^{[1]} &= \sigma(z^{[1]}),\\
+z^{[2]} &= W^{[2]}a^{[1]}+b^{[2]}, & a^{[2]} &= g(z^{[2]}),\\
 L &= \ell(a^{[2]},y).
-\end{align}
-Dabei
-\[
-W^{[1]}\in\R^{m\times d},\quad
-b^{[1]}\in\R^m,\quad
-W^{[2]}\in\R^{q\times m},\quad
-b^{[2]}\in\R^q.
-\]
+\end{align*}
+Here $W^{[1]}\in\R^{m\times d}$, $b^{[1]}\in\R^m$,
+$W^{[2]}\in\R^{q\times m}$ and $b^{[2]}\in\R^q$.
+The activations act element by element, and $\odot$ denotes
+elementwise multiplication.
 
-\subsection{Output-Schicht}
-Definiere
+\subsection{Output layer}
+The adjoint of the output preactivation is
 \[
-\delta^{[2]}:=\nabla_{z^{[2]}}L
-=
-\nabla_{a^{[2]}}\ell\;\odot\;g'(z^{[2]}).
+\delta^{[2]}=\nabla_{z^{[2]}}L=\nabla_{a^{[2]}}\ell\odot g'(z^{[2]}).
 \]
-Dann folgen per Differentialrechnung:
+The weight gradient is an outer product,
 \[
-\nabla_{W^{[2]}}L=\delta^{[2]}(a^{[1]})^\T,
-\qquad
+\nabla_{W^{[2]}}L=\delta^{[2]}(a^{[1]})^\T,\qquad
 \nabla_{b^{[2]}}L=\delta^{[2]}.
 \]
 
-\subsection{Hidden-Schicht}
-Rueckfluss in den Hidden-Aktivierungen:
+\subsection{Hidden layer}
+First pass the output adjoint back through the weight matrix,
 \[
 \nabla_{a^{[1]}}L=(W^{[2]})^\T\delta^{[2]}.
 \]
-Dann durch die Aktivierung:
+Then differentiate the hidden activation,
 \[
-\delta^{[1]}:=\nabla_{z^{[1]}}L
-=
-\nabla_{a^{[1]}}L\odot \sigma'(z^{[1]})
-=
-\big((W^{[2]})^\T\delta^{[2]}\big)\odot \sigma'(z^{[1]}).
+\delta^{[1]}=\nabla_{z^{[1]}}L
+=\big((W^{[2]})^\T\delta^{[2]}\big)\odot\sigma'(z^{[1]}).
 \]
-Damit:
+The remaining gradients are
 \[
-\nabla_{W^{[1]}}L=\delta^{[1]}x^\T,
-\qquad
-\nabla_{b^{[1]}}L=\delta^{[1]},
-\qquad
+\nabla_{W^{[1]}}L=\delta^{[1]}x^\T,\qquad
+\nabla_{b^{[1]}}L=\delta^{[1]},\qquad
 \nabla_x L=(W^{[1]})^\T\delta^{[1]}.
 \]
 
-\subsection{Indexform als Plausibilitaetscheck}
-Fuer die zweite Schicht:
+\subsection{Checking a single entry}
+For the two matrices, respectively,
 \[
-\frac{\partial L}{\partial W^{[2]}_{kj}}
-=
-\delta^{[2]}_k\,a^{[1]}_j.
+\frac{\partial L}{\partial W^{[2]}_{kj}}=\delta^{[2]}_k\,a^{[1]}_j,
+\qquad
+\frac{\partial L}{\partial W^{[1]}_{ji}}=\delta^{[1]}_j\,x_i.
 \]
-Fuer die erste Schicht:
-\[
-\frac{\partial L}{\partial W^{[1]}_{ji}}
-=
-\delta^{[1]}_j\,x_i.
-\]
-Jede Gewichtskomponente ist also immer
-\emph{(lokaler Rueckfehler)} $\times$ \emph{(eingehende Aktivierung)}.
+Each entry is the downstream neuron's adjoint times the value carried by
+the corresponding incoming connection.
 
-\section{Verallgemeinerung auf $K$ Schichten}
-Forward:
-\begin{align}
-a^{[0]}&=x,\\
-z^{[k]}&=W^{[k]}a^{[k-1]}+b^{[k]},\qquad k=1,\ldots,K,\\
-a^{[k]}&=g_k(z^{[k]}),\qquad k=1,\ldots,K,\\
-L&=\ell(a^{[K]},y).
-\end{align}
-
-Backward-Recursion:
+\section{A network with $K$ layers}
+Let $a^{[0]}=x$. The forward pass computes
 \[
-\delta^{[K]}
-=
-\nabla_{a^{[K]}}\ell \odot g_K'(z^{[K]}),
+z^{[k]}=W^{[k]}a^{[k-1]}+b^{[k]},\qquad
+a^{[k]}=g_k(z^{[k]}),\qquad k=1,\ldots,K,
 \]
+followed by $L=\ell(a^{[K]},y)$. With elementwise activations, the reverse pass starts at
 \[
-\delta^{[k]}
-=
-\left(W^{[k+1]}\right)^\T\delta^{[k+1]}
-\odot
-g_k'(z^{[k]}),
+\delta^{[K]}=\nabla_{a^{[K]}}\ell\odot g_K'(z^{[K]})
+\]
+and continues with
+\[
+\delta^{[k]}=\big((W^{[k+1]})^\T\delta^{[k+1]}\big)\odot g_k'(z^{[k]}),
 \qquad k=K-1,\ldots,1.
 \]
-Parametergradienten:
+At each layer,
 \[
-\nabla_{W^{[k]}}L=\delta^{[k]}(a^{[k-1]})^\T,
-\qquad
+\nabla_{W^{[k]}}L=\delta^{[k]}(a^{[k-1]})^\T,\qquad
 \nabla_{b^{[k]}}L=\delta^{[k]}.
 \]
-Damit ist Backprop eine reine lokale Rekursion ueber die Schichten.
 
-\section{Mini-Batch-Formulierung}
-Fuer Batchgroesse $B$ und Datenmatrix
+\section{A mini-batch}
+Stack the $B$ input examples into columns
+$X=[x^{(1)},\ldots,x^{(B)}]\in\R^{d\times B}$. With $\mathbf{1}_B$
+a column of ones, the forward equations become
+\begin{align*}
+A^{[0]}&=X,\\
+Z^{[k]}&=W^{[k]}A^{[k-1]}+b^{[k]}\mathbf{1}_B^\T,\\
+A^{[k]}&=g_k(Z^{[k]}).
+\end{align*}
+Take the mean of the individual losses $\ell_s$,
 \[
-X=[x^{(1)},\ldots,x^{(B)}]\in\R^{d\times B}
+\mathcal L=\frac1B\sum_{s=1}^B\ell_s,\qquad \ell_s=\ell(a^{[K](s)},y^{(s)}).
 \]
-schreiben wir
-\begin{align}
-A^{[0]} &= X,\\
-Z^{[k]} &= W^{[k]}A^{[k-1]} + b^{[k]}\mathbf{1}_B^\T,\\
-A^{[k]} &= g_k(Z^{[k]}).
-\end{align}
-Mit mittlerem Loss
+Let each column of $D^{[K]}$ be the adjoint for its own example,
 \[
-\mathcal{L}=\frac{1}{B}\sum_{s=1}^B \ell\!\left(a^{[K](s)},y^{(s)}\right)
+D^{[K]}_{:,s}=\nabla_{a^{[K](s)}}\ell_s\odot g_K'(z^{[K](s)}).
 \]
-ergeben sich
+Propagate these columns together through the hidden layers,
 \[
-D^{[K]}=
-\nabla_{A^{[K]}}\mathcal{L}\odot g_K'(Z^{[K]}),
+D^{[k]}=\big((W^{[k+1]})^\T D^{[k+1]}\big)\odot g_k'(Z^{[k]}).
 \]
+The columns still correspond to individual losses. Average once when taking
+the parameter gradients,
 \[
-D^{[k]}=
-\left(W^{[k+1]}\right)^\T D^{[k+1]}\odot g_k'(Z^{[k]}),
+\nabla_{W^{[k]}}\mathcal L=\frac1B D^{[k]}(A^{[k-1]})^\T,\qquad
+\nabla_{b^{[k]}}\mathcal L=\frac1B D^{[k]}\mathbf{1}_B.
 \]
-\[
-\nabla_{W^{[k]}}\mathcal{L}
-=
-\frac{1}{B}D^{[k]}(A^{[k-1]})^\T,
-\qquad
-\nabla_{b^{[k]}}\mathcal{L}
-=
-\frac{1}{B}D^{[k]}\mathbf{1}_B.
-\]
-Das ist die Form, die reale Implementierungen verwenden.
 
-\section{Warum Gradienten verschwinden oder explodieren koennen}
-Backprop multipliziert entlang langer Pfade viele Jacobians.
-Im Skalarfall:
+\section{Vanishing and exploding gradients}
+On a long path, backpropagation multiplies many Jacobians.
+For scalar functions, write $u_0=w$, $u_\ell=g_\ell(u_{\ell-1})$ and $F(w)=u_L$. Then
 \[
-F(w)=g_L\circ g_{L-1}\circ\cdots\circ g_1(w)
+F'(w)=\prod_{\ell=1}^L g_\ell'(u_{\ell-1}).
 \]
-\[
-F'(w)=\prod_{\ell=1}^{L}
-g_\ell'\!\left(g_{\ell-1}\circ\cdots\circ g_1(w)\right).
-\]
-Sind typische Betragswerte der Faktoren kleiner als $1$, schrumpft das Produkt
-exponentiell (vanishing gradients). Sind sie groesser als $1$, waechst es
-explosiv (exploding gradients).
+If the factors average less than one in magnitude on a geometric scale,
+their product shrinks exponentially with depth. Above one it grows.
 
-Eine einfache Varianzheuristik fuer
-$z=W a$ mit i.i.d.-Gewichten ($\mathbb{E}[W_{ij}]=0$, $\mathrm{Var}(W_{ij})=\sigma_w^2$):
+A similar estimate helps with initialization. Take $z=Wa$, independent
+zero-mean weights with variance $\sigma_w^2$, and centered inputs of equal
+variance independent of the weights. Then
 \[
-\mathrm{Var}(z_i)\approx n_{\mathrm{in}}\sigma_w^2\,\mathrm{Var}(a_j).
+\mathrm{Var}(z_i)=n_{\mathrm{in}}\sigma_w^2\,\mathrm{Var}(a_j).
 \]
-Stabile Skalenwahl fordert daher grob $n_{\mathrm{in}}\sigma_w^2\approx 1$
-(Xavier/He-Ideen je nach Aktivierung), plus in der Praxis oft:
-Batch Normalization, Gradient Clipping, geeignete Lernraten.
+Keeping $n_{\mathrm{in}}\sigma_w^2$ near one preserves variance across this
+linear step. Xavier and He initialization account for layer widths or the
+effect of the activation function. Normalization, gradient clipping and the
+choice of learning rate can also affect stability during training.
 
-\section{Finite-Difference Gradient Check}
-Zur Verifikation einer Implementierung (nicht fuer Training):
+\section{Checking gradients with finite differences}
+A central difference estimates one component of the gradient,
 \[
-g_i^{\mathrm{num}}
-=
-\frac{
-L(\theta+\varepsilon e_i)-L(\theta-\varepsilon e_i)
-}{2\varepsilon},
-\qquad
-\varepsilon\in[10^{-6},10^{-4}].
+g_i^{\mathrm{num}}=
+\frac{L(\theta+\varepsilon e_i)-L(\theta-\varepsilon e_i)}{2\varepsilon}.
 \]
-Vergleich mit analytischem Gradienten $g_i^{\mathrm{ana}}$ ueber
+Compare it with the analytic value using, for example,
 \[
 \mathrm{rel\_err}_i=
 \frac{|g_i^{\mathrm{ana}}-g_i^{\mathrm{num}}|}
-{\max\!\left(1,\ |g_i^{\mathrm{ana}}|,\ |g_i^{\mathrm{num}}|\right)}.
+{\max(1,\ |g_i^{\mathrm{ana}}|,\ |g_i^{\mathrm{num}}|)}.
 \]
-Typisch gilt bei korrekter Implementierung:
-$\mathrm{rel\_err}\ll 10^{-4}$ (abhaengig von Skalierung und Numerik).
+For well-scaled problems in double precision, a step between $10^{-6}$ and
+$10^{-4}$ can give a discrepancy well below $10^{-4}$. The C test in this
+repository stores parameters in single precision. It uses a larger step of
+$10^{-3}$ and divides by the actual distance between the two stored weights.
 
-\section{Quellenbezug auf \texttt{/literatur}}
-Die obige Darstellung orientiert sich direkt an den drei vorhandenen Quellen:
+\section{Reading alongside the derivation}
+The three references are in the repository's \texttt{literatur} directory.
 \begin{itemize}
-  \item \textbf{Andrew Ng, \textit{AI Lecture Notes}:}
-  Kettenregel und Backprop fuer 1-Neuron, 2-Layer und Multi-Layer in Kapitel 7.3,
-  inklusive matrixorientierter Ableitung und Laufzeitintuition.
-  \item \textbf{Hastie--Tibshirani--Friedman, \textit{The Elements of Statistical Learning}:}
-  Kapitel 11.3--11.5: Modellform, Fehlerfunktion, explizite Backprop-Gleichungen
-  (Forward/Backward Pass, lokale Fehlerterme, Gewichtsupdate).
-  \item \textbf{Han Veiga--Ged, \textit{The Mathematics of Machine Learning}:}
-  Kapitel zu Deep Learning/Backpropagation und die Analyse von
-  vanishing/exploding gradients als Produktstruktur der Kettenregel.
+  \item Andrew Ng, \textit{AI Lecture Notes}, section 7.3. Follow the chain rule
+    from a single neuron to a multilayer network, then compare the matrix
+    derivation and the cost of the backward pass.
+  \item Trevor Hastie, Robert Tibshirani and Jerome Friedman,
+    \textit{The Elements of Statistical Learning}, sections 11.3--11.5.
+    These sections derive the loss, the local error terms and the weight updates.
+  \item Maria Han Veiga and Fran\c{c}ois Gaston Ged,
+    \textit{The Mathematics of Machine Learning: Lectures on Supervised Methods and Beyond}.
+    The discussion of deep networks treats vanishing and exploding gradients
+    as products of derivatives along a path.
 \end{itemize}
-
-\section{Literatur}
-\begin{itemize}
-  \item Andrew Ng, \textit{AI Lecture Notes}. (Datei: \texttt{literatur/ai\_lecture\_notes\_andrewng.pdf})
-  \item Trevor Hastie, Robert Tibshirani, Jerome Friedman,
-  \textit{The Elements of Statistical Learning}. (Datei: \texttt{literatur/the elements if statistical learning.pdf})
-  \item Maria Han Veiga, Francois Gaston Ged,
-  \textit{The Mathematics of Machine Learning: Lectures on Supervised Methods and Beyond}.
-  (Datei: \texttt{literatur/The Mathematics of Machine Learning\_ ... .pdf})
-\end{itemize}
-
 \end{document}
