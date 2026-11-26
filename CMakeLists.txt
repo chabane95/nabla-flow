@@ -16,3 +16,20 @@ set_tests_properties(full_dimensions PROPERTIES PASS_REGULAR_EXPRESSION "50257,1
 add_test(NAME recall_reference COMMAND nablaflow recall
     "${CMAKE_CURRENT_SOURCE_DIR}/results/model.nfg" "${CMAKE_CURRENT_SOURCE_DIR}/data/recall.tsv")
 set_tests_properties(recall_reference PROPERTIES PASS_REGULAR_EXPRESSION "56,26,")
+
+option(NABLA_CUDA "Build the CUDA driver/NVRTC/cuBLAS training program" OFF)
+if(NABLA_CUDA)
+    add_executable(nfgpu tools/nfgpu.c src/gpu.c src/gpt.c src/checkpoint.c)
+    target_include_directories(nfgpu PRIVATE src)
+    set_target_properties(nfgpu PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(nfgpu PRIVATE /W4)
+    else()
+        target_compile_options(nfgpu PRIVATE -Wall -Wextra -Wpedantic)
+        target_link_libraries(nfgpu PRIVATE m ${CMAKE_DL_LIBS})
+    endif()
+    configure_file(src/gpu_kernels.cu gpu_kernels.cu COPYONLY)
+    add_test(NAME cuda_cpu_parity COMMAND nfgpu check)
+    set_tests_properties(cuda_cpu_parity PROPERTIES
+        ENVIRONMENT "NFGPU_KERNELS=${CMAKE_CURRENT_SOURCE_DIR}/src/gpu_kernels.cu")
+endif()

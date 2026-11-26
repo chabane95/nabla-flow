@@ -4,4 +4,6 @@
 __pycache__/
 /nablaflow
 /nablaflow.exe
+/nfgpu
+/nfgpu.exe
 *.u16

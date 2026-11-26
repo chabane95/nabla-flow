@@ -1,94 +1,46 @@
 # nabla-flow
 
-`Fach A: Glas. Fach B: Harz. In B liegt `
+Wie weit kommt GPT-2 auf einer einzelnen RTX 4070 SUPER, wenn man mit zufälligen Gewichten und gut einem Megabyte Shakespeare anfängt? Für diesen Versuch läuft der Decoder in C und CUDA. Er hat die 124.439.808 Parameter von GPT-2 Small. Vor dem ersten Update und danach alle 100 Schritte bekommt er denselben Redeanfang, `ROMEO:` mit einem Zeilenumbruch.
 
-Der kleine Transformer ergänzt **`Glas.`** Der Satz klingt richtig. Wer ihn liest, merkt sofort, wo der Fehler steckt. Genau dafür gibt es hier neben dem üblichen Sprachmodell-Loss noch eine zweite Auswertung. Sie fragt nach dem Inhalt der Antwort.
+Nach 2.400 Schritten steht da diese Zeile.
 
-Das Projekt fängt bei der [Kettenregel](latex/backprop_first_principles.tex) an und endet bei einem GPT-2-artigen Decoder in C11. Vorwärtsrechnung, Rückwärtsrechnung, Optimierer und Textgenerierung stehen im Quellcode. Zum Ausprobieren gibt es zwei trainierte Modelle. Das eine kennt kurze deutsche Laborprotokolle, das andere einen Ausschnitt aus Shakespeares *Coriolanus*. Derselbe C-Kern läuft auch mit den **124.439.808 Parametern von GPT-2 Small**. Für diese Größe ist ein Funktionstest dokumentiert. Die Sprachversuche unten stammen aus den beiden kleineren Modellen.
+```text
+ROMEO:
+Now, that is the time of me to hear.
+```
 
-**[Lernheft für Word herunterladen](docs/Lernheft.docx?raw=1)** · [C-Kern](src/gpt.c) · [Shakespeare-Versuch mit Textprobe](results/shakespeare/README.md) · [Training in GPT-2-Small-Größe](docs/gpt2-small.md)
+Ab **Now** ist alles generiert. Nach der Leerzeile hat das Modell selbst das Ende der Rede gesetzt. Am Anfang des Trainings stand an derselben Stelle noch ` Arsenal stained slap`. Was mich an der letzten Zeile interessiert, ist das holprige *the time of me to hear*. Der Anfang funktioniert gesprochen ganz gut. Gegen Ende passen die Wörter nur noch ungefähr zusammen. Die längste wörtliche Übereinstimmung mit einer Trainingsrede ist `, that is`, gerade mal drei Token. [Alle 25 Textproben mit Token-IDs und Fundstellen](results/gpt2-124m/samples-report.json)
 
-## In fünf Minuten ausprobieren
+## Was in den zwei Minuten passiert
 
-Ein C11-Compiler reicht. Die folgenden Befehle laufen in PowerShell mit GCC. Unter Linux und macOS genügen `make` und `./nablaflow`.
+[![Links der Verlust auf festen Trainingsfenstern und auf der Validierung. Rechts die Validierungs-Perplexität über den verarbeiteten Zieltoken.](results/gpt2-124m/training.png)](results/gpt2-124m/training.svg)
 
-~~~powershell
-gcc -O3 -std=c11 -Wall -Wextra -Wpedantic src/main.c src/gpt.c src/data.c src/checkpoint.c src/recall.c src/scale.c -o nablaflow.exe -lm
-.\nablaflow.exe check
-.\nablaflow.exe sample --model results/model.nfg --prompt "Fach A: Glas. Fach B: Harz. In B liegt " --temperature 0
-.\nablaflow.exe recall results/model.nfg data/recall.tsv
-~~~
+Nach 400 Updates ist der größte Sprung in der Kurve schon vorbei. Zu diesem Zeitpunkt schreibt das Modell `But I will I have thy good that I have not`. Man hört den Tonfall, aber schon bei *will I have* verliert sich der Satz. Bei jeder Textprobe sind Temperatur, Top-k und Zufallsseed gleich. So kann man beim Lesen verfolgen, was sich mit den Gewichten ändert. [Training als Animation](results/gpt2-124m/training.gif) · [Messwerte der Abbildung](results/gpt2-124m/history.csv)
 
-Bei Temperatur null nimmt der Generator jeweils das wahrscheinlichste zulässige Token. Probiere denselben Satz mit `In A liegt `. Die interessante Frage ist, ob sich beim Wechsel von A zu B auch das ausgegebene Material ändert.
+Pro Update zieht der Trainer vier Fenster zu je 128 Token. Nach 2.400 Updates sind das 1.228.800 Vorhersagen. Der Trainingsabschnitt selbst enthält nur 311.356 Token. Viele Stellen kommen also mehrmals dran. Das kurze Fenster ist auch die Stelle, an der ich für den eigenen Rechner gespart habe. Alle zwölf Transformerblöcke werden trainiert, von den 1.024 möglichen Positionen sieht das Modell während des Trainings nur die ersten 128. Bis zur letzten Validierung vergingen auf der 12-GB-Karte 121 Sekunden. [Lauf wiederholen oder einen eigenen Prompt eingeben](docs/training-124m.md)
 
-## Was lernt das Modell tatsächlich?
+## Wie gut sagt es fremden Text voraus?
 
-Für den ersten Versuch stehen in jeder Zeile zwei Dinge an zwei Orten, etwa zwei Farben oder zwei Materialien. Alle Wörter kommen schon im Training vor. Zurückgehalten werden ganze **Paare**. Glas und Harz sind so ein Testpaar. Ob das Glas in Fach A oder B liegt, macht für die Zuteilung keinen Unterschied. Andernfalls wäre ein gut aussehendes Ergebnis hier ziemlich billig. Der Generator liefert 248 Trainingszeilen, 56 zur Modellwahl und 56 für die abschließende Prüfung. [Datengenerator in C](tools/corpus.c) · [Testzeilen](data/test.txt)
+361 ganze Reden sind für die Validierung reserviert. Der Trainer sieht sie alle 100 Schritte und misst, wie viel Wahrscheinlichkeit das Modell den tatsächlich folgenden Token gibt. Die Gewichte werden dabei nur gelesen. Schritt 2.400 hat den niedrigsten mittleren Verlust. Erst mit diesen gespeicherten Gewichten kommt der Test auf den letzten 362 Reden.
 
-| Versuch | Zieltoken im Test | Bigramm-PPL | Transformer-PPL |
+| Modell und Textabschnitt | Vorhergesagte Token | Verlust in Nat pro Token | Perplexität |
 | --- | ---: | ---: | ---: |
-| Laborprotokolle, 35.776 Parameter | 2.490 | 3,682 | **1,270** |
-| Shakespeare, 43.056 Parameter | 6.819 | 10,696 | **6,981** |
+| GPT-2, Validierung | 13.106 | 4,145 | 63,10 |
+| GPT-2, Test | 13.564 | 5,171 | 176,05 |
+| Unigramm, derselbe Test | 13.564 | 6,684 | 799,28 |
 
-PPL ist die Perplexität, also der Exponentialwert der mittleren negativen Log-Likelihood pro Zieltoken. In beiden Versuchen ist ein Token ein UTF-8-Byte oder das Ende der Zeile. Das Bigramm kennt nur das unmittelbar vorhergehende Token. Der Transformer kann weiter zurücklesen. Die Tabellenzeilen haben unterschiedliche Korpora und Wortschätze. Der aussagekräftige Vergleich steht jeweils **innerhalb** einer Zeile. [Labor-Messung](results/test.csv) · [Shakespeare-Messung](results/shakespeare/test.csv)
+Das Unigramm zählt, wie häufig jedes Token im Training vorkommt. Nach `my` gibt es dieselben Wahrscheinlichkeiten aus wie nach `ROMEO:`. Der Abstand von 799 zu 176 zeigt, was der Decoder auf diesem Text gegenüber der reinen Häufigkeitszählung gewinnt. Perplexität ist hier `exp(mittlerer Verlust)`, gerechnet mit dem GPT-2-Tokenizer. [Testmessung](results/gpt2-124m/test.csv) · [Unigramm-Messung](results/gpt2-124m/unigram-test.csv)
 
-Für die Rückfragen zählt nur eine vollständig richtig erzeugte Fortsetzung bis zum Punkt. Das Labormodell schafft **26 von 56**. Eine feste Regel „nimm immer den ersten genannten Wert“ käme bei diesem Aufbau schon auf 28. Ein großer Teil des guten Token-Loss stammt also aus einem leichteren Problem: Satzbau, Leerzeichen und häufige Wortfolgen sind gut vorhersagbar. Wie viel davon auf die einzelnen Satzteile entfällt, müsste man mit einer getrennten Verlustmessung prüfen. [Rückfragen](data/recall.tsv) · [Gemessene Treffer](results/recall.csv)
+Warum liegen Validierung und Test so weit auseinander? Ein Unterschied fällt beim Lesen auf. Die Reden bleiben in der Reihenfolge der Vorlage. In der Validierung tragen 86 von 361 Reden eine Sprecherangabe, die im Training fehlt. Im Test sind es 290 von 362, darunter Prospero und Miranda. Wie viel vom höheren Verlust auf die Namen selbst entfällt, wäre eine eigene Messung. [Aufteilung von Tiny Shakespeare](results/gpt2-124m/data.json)
 
-[![Zwei Lernkurven mit Trainings- und Validierungsverlust des Transformers und horizontaler Bigramm-Referenz.](figures/lernkurve.png)](figures/lernkurve.svg)
+## Zwei Stellen im Code
 
-**Abb. 1.** Kreuzentropie bei zunehmender Zahl von Updates, links für die Laborprotokolle, rechts für Shakespeare. Beide Tafeln haben dieselbe logarithmische Ordinate. Die blaue Linie beruht auf einer festen Stichprobe von 64 Trainingsblöcken. Rot zeigt den ganzen Validierungssplit, das offene Quadrat markiert den gewählten Checkpoint. Beim Laborversuch fällt der Trainingsverlust nach Schritt 1000 weiter, die Validierung erreicht dort ihr Minimum.
+Beim Lesen würde ich mit der kausalen Maske anfangen. Für die Vorhersage hinter `Now,` darf der Attention-Kopf die Wörter rechts vom Komma noch nicht kennen. Das lässt sich direkt prüfen. Man tauscht das Ende der Eingabe aus und vergleicht die Ausgaben vor der Änderung. Im skalaren C-Kern müssen die früheren Logits Bit für Bit gleich bleiben. Im kleineren Byte-Modell kann man sich die berechneten Gewichte für ein kurzes Beispiel auch als Matrix ansehen. [C-Kern und Maskentest](src/gpt.c) · [Animierte Attention-Matrix](figures/attention.gif) · [Vaswani et al., Abschnitt 3.2](https://arxiv.org/abs/1706.03762)
 
-Für die Darstellung habe ich mich an zwei Physikabbildungen orientiert. Die gemeinsame Achsenskalierung der beiden Tafeln folgt dem Vergleich in Abb. 4 der Roberge-Weiss-Arbeit. Die offenen Symbole machen die Messpunkte auch im Schwarzweißdruck erkennbar, ähnlich wie in Abb. 5 der Arbeit zur Resonanzunterdrückung. Hier steht jede Kurve für einen einzelnen Trainingslauf. [Chabane und Endrödi, Abb. 4](https://pos.sissa.it/396/097/pdf#page=6) · [Chabane et al., Abb. 5](https://doi.org/10.1103/PhysRevC.111.034913)
+Die zweite Stelle ist die Tokenmatrix. GPT-2 benutzt sie zweimal, am Eingang zum Nachschlagen eines Tokenvektors und am Ausgang für die 50.257 möglichen nächsten Token. Beim Rückwärtsrechnen bekommt dieselbe Matrix deshalb Gradienten aus beiden Verwendungen. Man kann das am kleinen Netz mit finiten Differenzen für jeden Parameter prüfen. Auf der GPU übernimmt cuBLAS die Matrixprodukte. Die Kernel für Attention, Normalisierung und AdamW stehen hier im Projekt. [GPU-Code](src/gpu.c) · [CUDA-Kernel](src/gpu_kernels.cu) · [Parameterzahl nachrechnen](docs/gpt2-small.md) · [GPT-2-Bericht](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 
-## Vom Bigramm zur Attention
+## Zum Nachrechnen
 
-Karpathy beginnt mit der schlichten Frage, welches Zeichen nach dem bisherigen Text kommt. Im Bigramm reicht dafür eine Tabelle. Für `Glas` und `Holz` mehrere Wörter zurück braucht das Modell eine Möglichkeit, frühere Positionen einzubeziehen. Dafür ist die Self-Attention zuständig. Jeder Kopf bildet aus den Eingaben drei Projektionen, $Q$, $K$ und $V$. An Position $i$ gilt
+Die beiden kleinen Decoder lassen sich direkt aus dem Repository auf der CPU ausprobieren. Beim Labormodell reicht dafür eine Zeile. Auf `Fach A: Glas. Fach B: Harz. In B liegt ` folgt ausgerechnet `Glas.`. Der Satzbau sitzt, die Zuordnung geht schief. Deshalb zählt der Versuch neben der Perplexität auch die vollständig richtigen Antworten. Es sind 26 von 56. [Byte-Modelle bauen und ausprobieren](docs/byte-modelle.md) · [Kleiner Shakespeare-Versuch](results/shakespeare/README.md)
 
-$$
-a_{ij}=\frac{\exp(q_i^\top k_j/\sqrt{d_h})}{\sum_{m=0}^{i}\exp(q_i^\top k_m/\sqrt{d_h})},\quad j\le i,\qquad o_i=\sum_{j=0}^{i}a_{ij}v_j.
-$$
-
-Im C-Code endet die innere Schleife bei `j == i`. Damit kann ein späteres Zeichen die aktuelle Vorhersage auch während des Trainings nicht verraten. Der Test ändert den hinteren Teil einer Sequenz und prüft die früheren Logits bitweise. `inspect` gibt die tatsächlich berechneten Gewichte eines Kopfs als CSV aus. [Vaswani et al., Abschnitt 3.2](https://arxiv.org/abs/1706.03762) · [C-Implementierung und Tests](src/gpt.c)
-
-[![Die Matrix füllt sich im Takt der Eingabetokens. Oberhalb der Diagonalen bleibt die Zukunft maskiert.](figures/attention.gif)](figures/attention.svg)
-
-**Abb. 2.** Attention für den Text `Links: rot.` mit Starttoken, zweiter Block, erster Kopf. Eine Zeile gehört zu einer neuen Abfrageposition. Ihre Gewichte summieren sich zu eins. Die graue Fläche oberhalb der Diagonale ist maskiert. Die Animation deckt die bereits berechneten Präfixzeilen in Eingabereihenfolge auf. Die Skala bleibt von 0 bis 1. `␣` bezeichnet das Leerzeichen. Die Gewichte beschreiben das Mischen der Value-Vektoren in genau diesem Kopf. [Gemessene Matrix](results/attention.csv) · [Statischer Vektorexport](figures/attention.svg)
-
-## Was in einem Block steckt
-
-Die Eingabe ist die Summe aus Token- und Positionsvektor. Es folgen LayerNorm, kausale Multi-Head-Attention und eine Residualaddition. Der zweite Zweig besteht aus LayerNorm und einem MLP mit GELU und vierfacher innerer Breite. Am Ende teilen sich Einbettung und Ausgabeprojektion dieselbe Gewichtsmatrix. Bei der Rückwärtsrechnung müssen beide Beiträge zum Gradienten dieser Matrix addiert werden. Der Optimierer mittelt über alle Zieltoken im Batch, begrenzt die globale Gradientennorm und führt ein AdamW-Update aus. [GPT-2-Bericht, Abschnitte 2.2–2.3](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) · [AdamW](https://arxiv.org/abs/1711.05101)
-
-`nablaflow check` prüft alle 1.128 Parameter eines kleinen Testdecoders gegen zentrale finite Differenzen. Die größte absolute Abweichung im Referenzlauf beträgt **6,78 × 10⁻⁵** bei Modellgewichten in Float32. Zum Test gehören außerdem die kausale Maske, UTF-8-Grenzen, die Verschiebung der Zieltoken und ein Modell-Rundlauf durch die Checkpointdatei.
-
-## Den Laborversuch wiederholen
-
-~~~powershell
-.\nablaflow.exe train --train data/train.txt --val data/val.txt --out run-labor --steps 1800 --ctx 64 --width 32 --heads 4 --layers 2 --batch 8 --lr 0.002 --eval-every 50 --seed 42
-.\nablaflow.exe eval --model run-labor/model.nfg --data data/test.txt --train data/train.txt
-.\nablaflow.exe recall run-labor/model.nfg data/recall.tsv
-.\nablaflow.exe inspect --model run-labor/model.nfg --prompt "Links: rot." --layer 1 --head 0
-~~~
-
-`--out` legt einen neuen Ordner an. `history.csv` enthält die gemessenen Verluste, `summary.csv` die Konfiguration und `model.nfg` die Gewichte des auf der Validierung besten Checkpoints. Hier war das Schritt 1000 von 1800. Der Testsatz bleibt bis nach dieser Auswahl zu. Die beiden kleinen Checkpoints im Repository sind direkt für die Inferenz verwendbar. [Lernhistorie](results/history.csv) · [Konfiguration](results/summary.csv)
-
-Die mitgelieferten Grafiken lassen sich aus den C-Ausgaben neu zeichnen. NumPy und Matplotlib werden dafür gebraucht, Pillow schreibt das GIF.
-
-~~~sh
-python -m pip install -r requirements-plot.txt
-python tools/plot.py
-~~~
-
-## Notizen zum Lernen
-
-Zum Einstieg lohnen sich bei Andrew Ng die Abschnitte über den LMS-Schritt und die Softmax-Regression. Eine Rechnung, die man auf Papier nachprüfen kann, ist mir hier lieber als noch eine Loss-Kurve. Im Heft geht es deshalb zuerst um ein Gewicht, dann um ein Bigramm und erst danach um eine Zeile Attention. Eine Frage fürs eigene Protokoll: „Ist die zweite Kurve eigendlich besser, wenn ich nur nach dem richtigen Wort am Satzende frage?“ [CS229-Vorlesungsnotizen von Andrew Ng und Tengyu Ma](https://cs229.stanford.edu/notes2022fall/main_notes.pdf) · [Arbeitsheft](docs/Lernheft.docx?raw=1)
-
-Karpathys erstes Video ist der Einstieg zum Nachbauen, das zweite der Bezugspunkt für die Modellgröße und den Trainingsablauf. Wer eine Ableitung im C-Code verfolgen will, findet im vorhandenen LaTeX-Skript die Kettenregel auf Rechengraphen, lokale Ableitungen und den Finite-Difference-Check. Das Skript lässt sich im Ordner `latex` mit `pdflatex backprop_first_principles.tex` setzen. [Let's build GPT, ab 8:55](https://www.youtube.com/watch?v=kCc8FmEb1nY&t=535s) · [Let's reproduce GPT-2 (124M)](https://www.youtube.com/watch?v=l8pRSuU81PU) · [Herleitung zur Backpropagation](latex/backprop_first_principles.tex)
-
-<details>
-<summary>Die ursprüngliche Notiz zum Rechengraphen</summary>
-
-Ein Knoten speichert seinen Vorwärtswert `data` und die Adjungierte `grad`. Rückwärts werden die Beiträge in umgekehrter topologischer Reihenfolge aufsummiert. Für eine Kante von $u$ nach $w$ lautet die lokale Regel $\bar u \mathrel{+}= \bar w\,\partial w/\partial u$. Genau dieses Plus braucht die gemeinsam genutzte Tokenmatrix im Decoder.
-
-Zur mathematischen Ausarbeitung gehören die Literaturhinweise aus der ersten Fassung: Spivak, *Calculus*, Rudin, *Principles of Mathematical Analysis*, Bishop, *Pattern Recognition and Machine Learning*, Goodfellow, Bengio und Courville, *Deep Learning*, sowie Nocedal und Wright, *Numerical Optimization*.
-
-</details>
+Das Lernheft fängt bei einem einzelnen Gewicht an. Der Weg zur Attention führt über den Gradienten der Softmax-Regression, den man bei Andrew Ng auf Papier nachrechnen kann. Für den Übergang vom Bigramm zum Decoder und für die 124M-Konfiguration waren die beiden Vorlesungen von Andrej Karpathy die Vorlage. [Lernheft für Word](docs/Lernheft.docx?raw=1) · [Eigene Ableitungen im LaTeX-Skript](latex/backprop_first_principles.tex) · [CS229-Notizen](https://cs229.stanford.edu/notes2022fall/main_notes.pdf) · [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY&t=535s) · [Let's reproduce GPT-2](https://www.youtube.com/watch?v=l8pRSuU81PU)

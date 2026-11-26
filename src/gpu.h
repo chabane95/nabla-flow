@@ -1,0 +1,16 @@
+#ifndef NABLA_GPU_H
+#define NABLA_GPU_H
+#include "gpt.h"
+typedef struct GPUModel GPUModel;
+GPUModel *gpu_create(const Gpt *initialized, int batch_capacity, int window_capacity);
+int gpu_export(const GPUModel *model, Gpt *dest);
+/* Inputs and targets are B x T integers in row-major order. With NULL targets,
+   runs inference and returns 0; otherwise returns mean NLL. Errors return NAN.
+   Backward accumulates sums across calls, update averages over all tokens. */
+double gpu_pass(GPUModel *model, const int *inputs, const int *targets,
+                int batch, int length, int backward);
+int gpu_last_logits(GPUModel *model, int batch_index, int position, float *host_out);
+int gpu_update(GPUModel *model, double lr, double weight_decay, double clip, double *norm);
+void gpu_destroy(GPUModel *model);
+int gpu_selftest(void);
+#endif

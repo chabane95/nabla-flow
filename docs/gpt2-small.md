@@ -12,7 +12,7 @@ $$
 
 Die vier Attention-Projektionen tragen $4d^2$ pro Block bei, die zwei MLP-Matrizen $8d^2$. Dazu kommen die Biaswerte und die beiden LayerNorms eines Blocks. Die letzten $2d$ Parameter sind die abschließende LayerNorm. Ein zweites Mal $Vd$ für den Ausgabekopf zu addieren wäre bei diesem Netz ein Fehler. Der Befehl `nablaflow scale info` gibt **124.439.808** aus. [GPT-2-Referenzcode](https://github.com/openai/gpt-2/blob/master/src/model.py) · [C-Kern](../src/gpt.c)
 
-## Was bei voller Größe gelaufen ist
+## CPU-Funktionstest
 
 ~~~powershell
 .\nablaflow.exe scale info
@@ -21,7 +21,9 @@ Die vier Attention-Projektionen tragen $4d^2$ pro Block bei, die zwei MLP-Matriz
 
 Im Funktionstest bekommt der Transformer die GPT-2-IDs für `Hello, world!`. Vier Vorhersagen, also vier verschobene Ziele, gehen in die mittlere Kreuzentropie ein. Nach einem AdamW-Schritt auf dieser Sequenz sinkt sie von **11,052 auf 4,779 Nats je Token**. Die volle Parameterzahl ist auch bei diesem kurzen Fenster aktiv. Der C-Kern reserviert Aktivierungen nach der tatsächlich genutzten Länge. Beim Training mit vier Tokens liegen Gewichte, Gradienten, zwei Adam-Momente und Updatepuffer zusammen bei rund 2,32 GiB, zuzüglich Aktivierungen und Prozessspeicher. [Messzeile aus dem C-Lauf](../results/scale-smoke.csv)
 
-Auch der Weg über Dateien wurde geprüft. Trainingszeile `Hello, world!`, separate Validierungszeile `Hello, friend!`, Seed 42, ein Update. Die Validierungs-NLL betrug zuerst 11,22694 und danach 6,61927. Der geschriebene Checkpoint war 497.759.532 Byte groß. Nach dem Laden setzte das Modell die IDs `15496 11` greedy mit `995 0 50256` fort. Das ist ein Test für Training, Serialisierung und Inferenz auf wenigen Wörtern. Ein Vortraining auf Webtext und eine Sprachqualitätsmessung für das große Modell stehen aus. Die beiden längeren Sprachversuche mit Messungen auf ganzen Testkorpora sind im Haupttext verlinkt.
+Auch der Weg über Dateien wurde geprüft. Trainingszeile `Hello, world!`, separate Validierungszeile `Hello, friend!`, Seed 42, ein Update. Die Validierungs-NLL betrug zuerst 11,22694 und danach 6,61927. Der geschriebene Checkpoint war 497.759.532 Byte groß. Nach dem Laden setzte das Modell die IDs `15496 11` greedy mit `995 0 50256` fort. Das prüft Training, Serialisierung und Inferenz auf wenigen Wörtern.
+
+Für das Training auf zusammenhängendem Text gibt es inzwischen den CUDA-Pfad. Auf Tiny Shakespeare hat er 2.400 AdamW-Schritte ausgeführt, bei gleicher Parameterzahl und einer Fensterlänge von 128. Einzelne Fenster können über ein Redeende hinweg reichen. Die Auswertung des ausgewählten Checkpoints ergibt auf 13.564 Testzielen eine Perplexität von 176,05. [Textprobe und Lernkurve](../README.md) · [Laufprotokoll und Befehle für die GPU](training-124m.md)
 
 ## Eigene Texte
 

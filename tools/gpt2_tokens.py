@@ -13,6 +13,7 @@ def main():
     encode.add_argument("shard", type=Path)
     prompt = commands.add_parser("prompt", help="Print the token IDs of an exact prompt")
     prompt.add_argument("text")
+    prompt.add_argument("--out", type=Path, help="Also write the exact IDs as a new uint16-LE file (no EOT)")
     commands.add_parser("decode", help="Decode space-separated decimal IDs from stdin")
     args = parser.parse_args()
     import tiktoken
@@ -35,7 +36,12 @@ def main():
                 count += len(ids)
         print(f"{count} tokens")
     elif args.command == "prompt":
-        print(*codec.encode_ordinary(args.text))
+        ids = codec.encode_ordinary(args.text)
+        if args.out:
+            import struct
+            with args.out.open("xb") as stream:
+                stream.write(struct.pack(f"<{len(ids)}H", *ids))
+        print(*ids)
     else:
         ids = [int(s) for s in sys.stdin.read().split()]
         if any(i < 0 or i >= codec.n_vocab for i in ids):

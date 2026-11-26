@@ -3,6 +3,9 @@ src/*.h text
 data/*.txt text eol=lf
 data/*.tsv text eol=lf
 results/*.csv text eol=lf
+results/gpt2-124m/*.csv text eol=lf
+results/gpt2-124m/*.json text eol=lf
+results/gpt2-124m/*.ids text eol=lf
 *.nfg binary
 *.png binary
 *.docx binary

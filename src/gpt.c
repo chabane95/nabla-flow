@@ -498,6 +498,11 @@ double gpt_backward(Gpt *model, const int *targets)
     return loss;
 }
 
+const float *gpt_gradient(const Gpt *model)
+{
+    return model && model->state ? model->state->grad : NULL;
+}
+
 void gpt_zero_grad(Gpt *model)
 {
     if (model && model->state) {

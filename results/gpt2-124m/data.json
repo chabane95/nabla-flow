@@ -1,0 +1,71 @@
+{
+  "source": "https://raw.githubusercontent.com/karpathy/char-rnn/370cbcd448eb7daf32f21a6be560b70e0b33c4e3/data/tinyshakespeare/input.txt",
+  "source_commit": "370cbcd448eb7daf32f21a6be560b70e0b33c4e3",
+  "source_git_blob": "7dcb3a2d4cc3b48b6283dd46870bfeb78f88aac9",
+  "source_bytes": 1115394,
+  "source_sha256": "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed",
+  "source_speeches": 7222,
+  "split_rule": "Contiguous source order by speech count, boundaries floor(0.90*N) and floor(0.95*N).",
+  "document_rule": "A blank-line-delimited speech; keep all physical LFs, including its separator, then append EOT.",
+  "deduplication": "Compare whole speeches after stripping trailing LFs only. Keep within-split repetitions. Drop later-split copies of earlier-split speeches.",
+  "speaker_overlap_rule": "For each retained speech compare its first line (speaker heading, including the colon, exact case) to the set of first lines in retained training speeches. Count each speech once, including repeated speakers.",
+  "encoding": "gpt2",
+  "tokenizer_version": "0.14.0",
+  "format": "little-endian uint16",
+  "eot_id": 50256,
+  "sample_prompt": "ROMEO:\n",
+  "sample_prompt_ids": [
+    33676,
+    4720,
+    25,
+    198
+  ],
+  "splits": {
+    "train": {
+      "source_range_zero_based_half_open": [
+        0,
+        6499
+      ],
+      "source_speeches": 6499,
+      "speeches": 6499,
+      "distinct_speeches": 6435,
+      "speeches_with_speaker_unseen_in_training": 0,
+      "cross_split_copies_removed": 0,
+      "utf8_bytes_kept": 1032985,
+      "tokens_including_eot": 311356,
+      "size_bytes": 622712,
+      "sha256": "2aeea0da9f1bf26b6244ab22f41444ccf185c49dd9785c3c2cf650e71bb7bb02"
+    },
+    "val": {
+      "source_range_zero_based_half_open": [
+        6499,
+        6860
+      ],
+      "source_speeches": 361,
+      "speeches": 361,
+      "distinct_speeches": 354,
+      "speeches_with_speaker_unseen_in_training": 86,
+      "cross_split_copies_removed": 0,
+      "utf8_bytes_kept": 40020,
+      "tokens_including_eot": 13107,
+      "size_bytes": 26214,
+      "sha256": "57ee490f58fc073c4c07f703cc86c4cb877b731d3efb009e93c76c67edfa56c0"
+    },
+    "test": {
+      "source_range_zero_based_half_open": [
+        6860,
+        7222
+      ],
+      "source_speeches": 362,
+      "speeches": 362,
+      "distinct_speeches": 359,
+      "speeches_with_speaker_unseen_in_training": 290,
+      "cross_split_copies_removed": 0,
+      "utf8_bytes_kept": 42389,
+      "tokens_including_eot": 13565,
+      "size_bytes": 27130,
+      "sha256": "877e82b0e209cbee7ae6745beb284677b8e6616c855179efa666291e2a40a0d0"
+    }
+  },
+  "removed_speeches": []
+}
