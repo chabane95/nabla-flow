@@ -1,97 +1,169 @@
-"""Draw the Medium run's board-memory samples and explicit CUDA allocations."""
+"""Plot the recorded Medium run. Default output is a 178 mm PNG, SVG and PDF.
+
+    python tools/plot_medium_memory.py
+    python tools/plot_medium_memory.py --board BOARD.csv --cuda CUDA.csv --out figure.pdf
+    python tools/plot_medium_memory.py --out results/gpt2-medium-355m/memory.gif
+"""
 import argparse
 import csv
-import math
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import AutoMinorLocator, FuncFormatter, MaxNLocator
 
 
 DEFAULT = Path(__file__).resolve().parents[1] / "results" / "gpt2-medium-355m"
 GIB = 2**30
-INK, BLUE, GRAY = "#152d41", "#176391", "#536777"
 
 
-def number(value):
-    return f"{value:.2f}".replace(".", ",")
-
-
-def read_csv(path):
+def read_rows(path):
     with path.open(encoding="utf-8-sig", newline="") as stream:
         return list(csv.DictReader(stream))
 
 
-def plot(board, cuda, output):
-    rows = read_csv(board)
+def decimal(value, digits=2):
+    return f"{value:.{digits}f}".replace(".", ",")
+
+
+def board_readings(path):
+    rows = read_rows(path)
     if not rows or rows[0]["phase"] != "before" or rows[-1]["phase"] != "after":
         raise ValueError("A complete board trace needs before and after measurements")
     time = [float(row["elapsed_s"]) for row in rows]
-    used = [int(row["used_mib"]) / 1024 for row in rows]
+    used = [int(row["used_mib"])/1024 for row in rows]
     active = [i for i, row in enumerate(rows) if row["phase"] == "run"]
     if not active or any(b < a for a, b in zip(time, time[1:])):
         raise ValueError("Expected chronological samples during the run")
-    peak = max(active, key=used.__getitem__)
-    capacity = int(rows[0]["total_mib"]) / 1024
+    return time, used, max(active, key=used.__getitem__)
 
-    ready = next((row for row in read_csv(cuda) if row["phase"] == "buffers_ready"), None)
-    if ready is None:
-        raise ValueError("Missing buffers_ready in the CUDA memory trace")
-    training = int(ready["training_buffer_bytes"]) / GIB
-    arena = int(ready["arena_bytes"]) / GIB
-    if min(training, arena) <= 0:
-        raise ValueError("Expected both FP32 training state and a working arena")
 
-    plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 11,
-                         "text.color": INK, "axes.labelcolor": INK,
-                         "xtick.color": GRAY, "ytick.color": GRAY})
-    fig, (trace, buffers) = plt.subplots(2, 1, figsize=(10.8, 6.8),
-                                        gridspec_kw={"height_ratios": (4, 1)})
-    fig.subplots_adjust(left=.105, right=.97, bottom=.12, top=.80, hspace=.61)
-    fig.text(.105, .95, "GPU-Speicher beim Training von GPT-2 Medium",
-             fontsize=23, weight="bold", va="top")
-    fig.text(.105, .885, "RTX 4070 SUPER  ·  4 Fenster je Batch  ·  128 Tokens je Fenster",
-             color=GRAY, fontsize=12)
-    trace.set_title("Belegung der gesamten Grafikkarte", loc="left", weight="bold", fontsize=13)
-    trace.plot(time, used, color=BLUE, linewidth=1.6, marker=".", markersize=2, zorder=3)
-    trace.axhline(capacity, lw=1, ls=":", color=GRAY)
-    trace.annotate(f"Kapazität  {number(capacity)} GiB", (time[-1], capacity),
-                   xytext=(0, -5), textcoords="offset points", ha="right", va="top", color=GRAY)
-    trace.axhline(used[0], lw=.9, ls="--", color=GRAY)
-    trace.annotate(f"Vor dem Start  {number(used[0])} GiB", (time[0], used[0]),
-                   xytext=(8, 8), textcoords="offset points", color=GRAY)
-    trace.plot(time[peak], used[peak], marker="o", ms=6, color=BLUE, zorder=4)
-    trace.annotate(f"Beobachtetes Maximum  {number(used[peak])} GiB",
-                   (time[peak], used[peak]), xytext=(0, 15), textcoords="offset points",
-                   ha="center", weight="bold", color=BLUE)
-    trace.set(xlim=(0, time[-1] * 1.025), ylim=(0, math.ceil(capacity + .4)),
-              xlabel="Zeit seit Beginn der Aufzeichnung (s)", ylabel="Belegter Speicher (GiB)")
-    trace.yaxis.set_major_locator(MaxNLocator(integer=True, steps=[2, 5, 10], nbins=8))
-    trace.grid(axis="y", color="#dfe5e9", linewidth=.65)
-    trace.set_axisbelow(True)
-    trace.spines[["top", "right"]].set_visible(False)
-    trace.spines[["bottom", "left"]].set_color("#b0bec7")
+def cuda_readings(path):
+    rows = read_rows(path)
+    ready = next((row for row in rows if row["phase"] == "buffers_ready"), None)
+    if ready is None or rows[0]["phase"] != "context_baseline":
+        raise ValueError("Expected the context baseline and buffers_ready in the CUDA trace")
+    observed = max(int(row["delta_from_context_bytes"]) for row in rows)/GIB
+    reserved = (int(ready["training_buffer_bytes"])+int(ready["arena_bytes"]))/GIB
+    if min(observed, reserved) <= 0:
+        raise ValueError("Expected positive memory readings")
+    return observed, reserved
 
-    buffers.set_title("Vom Trainer reservierte Puffer", loc="left", weight="bold", fontsize=13)
-    buffers.set_title(f"{number(training+arena)} GiB zusammen", loc="right", color=GRAY, fontsize=12)
-    sizes = [training/4] * 4 + [arena]
-    labels = ["Gewichte", "Gradienten", "Adam-Moment 1", "Adam-Moment 2", "Arbeitsbereich"]
-    left = 0.0
-    for i, (width, label) in enumerate(zip(sizes, labels)):
-        buffers.barh(0, width, left=left, height=.9, color=BLUE if i < 4 else "#246655",
-                     edgecolor="white", linewidth=1.5)
-        buffers.text(left+width/2, 0, f"{label}\n{number(width)} GiB", ha="center",
-                     va="center", fontsize=10.5, color="white", linespacing=1.4)
-        left += width
-    buffers.set(xlim=(0, left), ylim=(-.52, .52))
-    buffers.set_axis_off()
-    fig.text(.105, .052, f"Die Kurve zeigt {len(rows)} Messwerte von nvidia-smi einschließlich Desktop und anderer Prozesse.",
-             fontsize=10, color=GRAY)
-    fig.text(.105, .025, "Die Puffergrößen stammen aus den beiden CUDA-Allokationen in memory.csv. Ein GiB entspricht 2³⁰ Byte.",
-             fontsize=10, color=GRAY)
-    fig.savefig(output, dpi=180, facecolor="white")
+
+def paper_style():
+    plt.rcParams.update({"font.family": "serif", "font.serif": ["STIXGeneral", "DejaVu Serif"],
+                         "mathtext.fontset": "stix", "font.size": 9, "axes.linewidth": .65,
+                         "axes.labelsize": 9, "axes.titlesize": 9, "xtick.labelsize": 8,
+                         "ytick.labelsize": 8, "pdf.fonttype": 42, "svg.fonttype": "none",
+                         "svg.hashsalt": "nabla-flow-medium-memory"})
+
+
+def style_axis(ax):
+    ax.tick_params(which="both", direction="in", top=True, right=True, width=.6)
+    ax.tick_params(which="major", length=3.3, pad=3)
+    ax.tick_params(which="minor", length=1.8)
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}".replace(".", ",")))
+
+
+def set_trace_axes(trace, time, used):
+    trace.set(xlabel="Zeit seit Messbeginn (s)", ylabel="Belegter Speicher (GiB)",
+              xlim=(-.025*time[-1], time[-1]*1.028), ylim=(0, max(used)*1.20))
+    trace.xaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 5, 10]))
+    trace.xaxis.set_minor_locator(AutoMinorLocator())
+    trace.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 5, 10]))
+
+
+def animate_board(board, output):
+    """One frame per actual sample, paced at double speed with a 2 s final hold."""
+    from PIL import Image
+
+    time, used, peak = board_readings(board)
+    fig, ax = plt.subplots(figsize=(6.1, 2.9), dpi=150)
+    fig.subplots_adjust(left=.105, right=.977, top=.86, bottom=.19)
+    style_axis(ax)
+    set_trace_axes(ax, time, used)
+    ax.set_title("GPT-2 Medium · gesamte Grafikkarte", loc="left", pad=6)
+    stamp = ax.set_title("", loc="right", pad=6, fontsize=8)
+    ax.axhline(used[0], color=".50", linewidth=.65, linestyle=(0, (4, 3)))
+    ax.annotate(f"vor dem Lauf  {decimal(used[0])} GiB", ((time[0]+time[-1])/2, used[0]),
+                xytext=(0, 5), textcoords="offset points", ha="center", fontsize=8)
+    curve, = ax.plot([], [], color=".15", linewidth=.9)
+    sample, = ax.plot([], [], "o", color=".15", markersize=3.5)
+    high, = ax.plot(time[peak], used[peak], "^", color=".15", markerfacecolor="white",
+                    markersize=5, markeredgewidth=.8)
+    peak_label = ax.annotate(f"Maximum  {decimal(used[peak])} GiB", (time[peak], used[peak]),
+                             xytext=(4, 7), textcoords="offset points", fontsize=8)
+    frames = []
+    try:
+        for i, (t, value) in enumerate(zip(time, used)):
+            curve.set_data(time[:i+1], used[:i+1])
+            sample.set_data([t], [value])
+            high.set_visible(i >= peak)
+            peak_label.set_visible(i >= peak)
+            stamp.set_text(f"{decimal(t)} s   ·   {decimal(value)} GiB")
+            fig.canvas.draw()
+            frame = Image.frombuffer("RGBA", fig.canvas.get_width_height(),
+                                     fig.canvas.buffer_rgba(), "raw", "RGBA", 0, 1)
+            frames.append(frame.convert("L"))
+        # GIF delay units are centiseconds. Round cumulative timestamps to avoid drift.
+        centiseconds = [round((t-time[0])*50) for t in time]
+        delays = [10*max(1, b-a) for a, b in zip(centiseconds, centiseconds[1:])]
+        frames[0].save(output, save_all=True, append_images=frames[1:],
+                       duration=delays+[2000], loop=0, optimize=False)
+    finally:
+        plt.close(fig)
+
+
+def plot(board, cuda, output):
+    paper_style()
+    if output is not None and output.suffix.lower() == ".gif":
+        animate_board(board, output)
+        return
+    time, used, peak = board_readings(board)
+    cuda_delta, reserved = cuda_readings(cuda)
+    quantities = (used[peak]-used[0], cuda_delta, reserved)
+    fig, (trace, comparison) = plt.subplots(1, 2, figsize=(178/25.4, 66/25.4),
+                                           gridspec_kw={"width_ratios": [1.35, 1]})
+    fig.subplots_adjust(left=.072, right=.982, top=.891, bottom=.20, wspace=.30)
+    for ax in (trace, comparison):
+        style_axis(ax)
+
+    trace.set_title("(a) Belegung der Grafikkarte", loc="left", pad=4)
+    trace.axhline(used[0], color=".52", linewidth=.65, linestyle=(0, (4, 3)), zorder=1)
+    trace.plot(time, used, color="#233c57", linewidth=.75, zorder=2)
+    trace.plot(time[0], used[0], marker="s", markersize=3.5, markerfacecolor="white",
+               markeredgecolor=".2", markeredgewidth=.7, zorder=3)
+    trace.plot(time[peak], used[peak], marker="^", markersize=4.6, markerfacecolor="white",
+               markeredgecolor="black", markeredgewidth=.8, zorder=3)
+    trace.annotate(f"vor dem Lauf  {decimal(used[0])}", ((time[0]+time[-1])/2, used[0]),
+                   xytext=(0, 5), textcoords="offset points", fontsize=8, ha="center")
+    trace.annotate(f"Maximum  {decimal(used[peak])}", (time[peak], used[peak]),
+                   xytext=(4, 6), textcoords="offset points", fontsize=8)
+    set_trace_axes(trace, time, used)
+
+    comparison.set_title("(b) Speicherzuwachs und Puffer", loc="left", pad=4)
+    for i, (value, symbol) in enumerate(zip(quantities, ("^", "o", "D"))):
+        comparison.plot(i, value, marker=symbol, markersize=4.6, markeredgewidth=.8,
+                        markerfacecolor="white" if i < 2 else ".25", markeredgecolor=".15")
+        comparison.annotate(decimal(value), (i, value), xytext=(0, 7),
+                            textcoords="offset points", ha="center", fontsize=8)
+    span = max(max(quantities)-min(quantities), .1)
+    comparison.set(xlim=(-.44, 2.44), ylim=(min(quantities)-.48*span, max(quantities)+.60*span),
+                   ylabel="Speicher (GiB)")
+    comparison.set_xticks(range(3), [r"$\Delta$ Karte", r"$\Delta$ CUDA", "Puffersumme"])
+    comparison.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 5, 10]))
+    comparison.grid(axis="y", linewidth=.35, color=".84", linestyle=(0, (1, 3)))
+    comparison.set_axisbelow(True)
+
+    paths = [output] if output is not None else [DEFAULT/f"memory.{fmt}" for fmt in ("png", "svg", "pdf")]
+    for path in paths:
+        metadata = {"Date": None} if path.suffix.lower() == ".svg" else None
+        if path.suffix.lower() == ".pdf":
+            metadata = {"CreationDate": None, "ModDate": None}
+        fig.savefig(path, dpi=400, facecolor="white", metadata=metadata)
     plt.close(fig)
 
 
@@ -99,6 +171,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board", type=Path, default=DEFAULT/"board-memory.csv")
     parser.add_argument("--cuda", type=Path, default=DEFAULT/"memory.csv")
-    parser.add_argument("--out", type=Path, default=DEFAULT/"memory.png")
+    parser.add_argument("--out", type=Path, help="write only the specified output file")
     args = parser.parse_args()
     plot(args.board, args.cuda, args.out)

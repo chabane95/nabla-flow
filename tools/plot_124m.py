@@ -93,11 +93,11 @@ def render(run, out):
         perplexity = np.exp(val[measured])
     unit, token_label = token_axis(tokens[-1])
     x_tokens = tokens[measured] / unit
-    fig, (first, second) = plt.subplots(1, 2, figsize=(7.45, 3.58))
-    fig.subplots_adjust(left=.092, right=.971, top=.89, bottom=.235, wspace=.36)
-    for ax, name in ((first, "(a)  Cross-entropy"), (second, "(b)  Validation perplexity")):
-        ax.set_title(name, loc="left", fontsize=9.5, pad=5)
-        ax.tick_params(which="both", direction="in", top=True, right=True)
+    # A two-column journal figure at 178 mm, with common baselines and type.
+    fig, (first, second) = plt.subplots(1, 2, figsize=(178/25.4, 72/25.4))
+    fig.subplots_adjust(left=.087, right=.98, top=.904, bottom=.167, wspace=.31)
+    for ax, name in ((first, "(a)   Cross-entropy"), (second, "(b)   Validation perplexity")):
+        ax.set_title(name, loc="left", fontsize=10, pad=4)
         ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(2))
         ax.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,g}"))
         ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:g}"))
@@ -108,11 +108,33 @@ def render(run, out):
     first.set_ylim(*bounded(np.concatenate((train[np.isfinite(train)], val[measured]))))
     first.set_xlim(steps[0]-.035*max(steps[-1]-steps[0], 1),
                    steps[-1]+.035*max(steps[-1]-steps[0], 1))
-    tr_line, = first.plot([], [], color=BLUE, lw=.95, marker=".", ms=2.7, label="Training sample")
-    va_line, = first.plot([], [], ls="none", color=RED, marker="o", mfc="white", ms=3.8,
-                          mew=.8, label="Validation")
-    fig.legend(handles=(tr_line, va_line), loc="lower left", bbox_to_anchor=(.069,.001),
-               ncol=2, frameon=False, columnspacing=1.25, handletextpad=.4)
+    train_style = dict(color=BLUE, lw=.85, marker=".", ms=3.4)
+    val_style = dict(color=RED, ls="none", marker="o", mfc="white", ms=3.8, mew=.75)
+    tr_line, = first.plot([], [], **train_style, label="Training sample")
+    va_line, = first.plot([], [], **val_style, label="Validation")
+    first.legend(loc="upper right", ncol=2, frameon=False, columnspacing=.9,
+                 borderaxespad=.55, handlelength=1.5, handletextpad=.35)
+
+    # Magnify the late gap between the losses without changing the main scale.
+    # Keep short or sparse histories on the two main axes.
+    late = steps >= .5*(float(steps[0])+steps[-1])
+    inset = None
+    if np.count_nonzero(late & np.isfinite(train) & measured) >= 6:
+        inset = first.inset_axes([.47, .46, .47, .31])
+        late_train, = inset.plot([], [], **{**train_style, "ms": 2.6})
+        late_val, = inset.plot([], [], **{**val_style, "ms": 2.8})
+        inset.set_title("Second half", fontsize=7.5, pad=2)
+        late_loss = np.concatenate((train[late & np.isfinite(train)], val[late & measured]))
+        inset.set_ylim(*bounded(late_loss))
+        late_steps = steps[late]
+        xpad = .04*np.ptp(late_steps)
+        inset.set_xlim(late_steps[0]-xpad, late_steps[-1]+xpad)
+        inset.set_xticks(late_steps[[0, len(late_steps)//2, -1]])
+        inset.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,g}"))
+        inset.yaxis.set_major_locator(ticker.MaxNLocator(3))
+        inset.tick_params(labelsize=6.7, length=2.2, pad=1.8)
+        for spine in inset.spines.values():
+            spine.set_linewidth(.5)
     second.set(xlabel=token_label, ylabel=r"Perplexity $\exp(\mathcal{L}_{\mathrm{val}})$")
     second.xaxis.set_major_locator(ticker.MaxNLocator(5, integer=(unit == 1)))
     extent = max((tokens[-1]-tokens[0])/unit, 1/unit)
@@ -124,9 +146,11 @@ def render(run, out):
             if max(perplexity)/min(perplexity) >= 100:
                 second.yaxis.set_major_locator(ticker.LogLocator(base=10, subs=(1,)))
                 second.yaxis.set_major_formatter(ticker.LogFormatterMathtext())
+                second.yaxis.set_minor_locator(ticker.LogLocator(base=10, subs=(2, 3, 4, 5, 6, 7, 8, 9)))
             else:
                 second.yaxis.set_major_locator(ticker.LogLocator(base=10, subs=(1, 2, 5)))
                 second.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:g}"))
+                second.yaxis.set_minor_locator(ticker.LogLocator(base=10, subs=(3, 4, 6, 7, 8, 9)))
             second.yaxis.set_minor_formatter(ticker.NullFormatter())
         else:
             second.yaxis.set_major_locator(ticker.MaxNLocator(5))
@@ -134,10 +158,11 @@ def render(run, out):
         second.set_ylim(*bounded(perplexity, positive_log=use_log))
     else:
         second.set_yticks([])
-    ppl_line, = second.plot([], [], ls="none", marker="o", color=RED, mfc="white", ms=4, mew=.85)
+    ppl_line, = second.plot([], [], **val_style)
     waiting = second.text(.50, .50, "Awaiting validation", ha="center", va="center",
                           color="0.4", fontsize=8, transform=second.transAxes)
-    stamp = fig.text(.97, .038, "", ha="right", va="center", fontsize=8)
+    stamp = second.text(.96, .95, "", transform=second.transAxes, ha="right", va="top",
+                        fontsize=8, linespacing=1.3)
 
     def show(index):
         take = slice(0, index+1)
@@ -146,17 +171,23 @@ def render(run, out):
         va_line.set_data(steps[take][measured[take]], val[take][measured[take]])
         ppl_line.set_data(x_tokens[:nval], perplexity[:nval])
         waiting.set_visible(nval == 0)
-        stamp.set_text(f"Step {steps[index]:,}    ·    {tokens[index]:,} target tokens")
+        stamp.set_text(f"Step {steps[index]:,}\n{tokens[index]:,} target tokens")
+        if inset is not None:
+            visible = late[take]
+            late_train.set_data(steps[take][visible], train[take][visible])
+            late_val.set_data(steps[take][visible], val[take][visible])
+            inset.set_visible(visible.any())
 
     out.mkdir(parents=True, exist_ok=True)
     show(len(steps)-1)
-    fig.savefig(out / "training.png", dpi=300)
+    fig.savefig(out / "training.png", dpi=400)
+    fig.savefig(out / "training.pdf", metadata={"CreationDate": None, "ModDate": None})
     svg = io.StringIO()
     fig.savefig(svg, format="svg", metadata={"Date": None})
     with (out / "training.svg").open("w", encoding="utf-8", newline="\n") as dest:
         dest.writelines(line.rstrip()+"\n" for line in svg.getvalue().splitlines())
     frames = []
-    fig.set_dpi(145)
+    fig.set_dpi(160)
     for index in frame_indices(len(steps)):
         show(index)
         fig.canvas.draw()
@@ -175,9 +206,14 @@ def main():
     parser.add_argument("--run", type=Path, default=DEFAULT_RUN, help="Directory containing history.csv")
     parser.add_argument("--out", type=Path, help="Output directory (defaults to the run directory)")
     args = parser.parse_args()
-    plt.rcParams.update({"font.family": "DejaVu Serif", "mathtext.fontset": "stix", "font.size": 9,
-                         "axes.linewidth": .75, "xtick.labelsize": 8, "ytick.labelsize": 8,
-                         "legend.fontsize": 8, "svg.hashsalt": "nabla-flow-124m"})
+    plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 9,
+                         "pdf.fonttype": 42, "svg.hashsalt": "nabla-flow-124m",
+                         "axes.linewidth": .65, "axes.labelpad": 3, "legend.fontsize": 8,
+                         "xtick.labelsize": 8, "ytick.labelsize": 8,
+                         "xtick.direction": "in", "ytick.direction": "in",
+                         "xtick.top": True, "ytick.right": True, "xtick.major.pad": 3, "ytick.major.pad": 3,
+                         "xtick.major.size": 3.2, "ytick.major.size": 3.2,
+                         "xtick.minor.size": 1.7, "ytick.minor.size": 1.7})
     try:
         render(args.run, args.out or args.run)
     except (OSError, ValueError, TypeError, FloatingPointError) as exc:

@@ -11,3 +11,4 @@ results/gpt2-medium-355m/best.nfg filter=lfs diff=lfs merge=lfs -text
 *.png binary
 *.docx binary
 figures/*.svg text eol=lf whitespace=-trailing-space linguist-generated=true
+results/**/*.svg text eol=lf whitespace=-trailing-space linguist-generated=true

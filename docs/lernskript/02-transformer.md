@@ -32,6 +32,8 @@ Mit $H$ Köpfen ist die Breite eines Kopfes $d_h=d/H$. Jede der drei Matrizen ei
 
 ![Trainierte Gewichte des Fachmodells. Oben stehen die 32 Koordinaten für acht Byte-IDs, unten die acht Zeilen der Query-Matrix des ersten Kopfes im ersten Block.](../../figures/byte-weights.png)
 
+Beide Ausschnitte verwenden dieselbe symmetrische Farbskala von $-0{,}55$ bis $+0{,}55$. Jede Zelle zeigt einen dimensionslosen FP32-Parameter. Acht ausgewählte Bytes füllen Panel (a), alle acht Query-Komponenten eines Kopfes füllen Panel (b). [Vektoransicht](../../figures/byte-weights.svg) · [Druckfassung](../../figures/byte-weights.pdf) · [Plot aus dem Checkpoint erzeugen](../../tools/plot_byte_weights.py)
+
 In der oberen Matrix kannst du die Zeile für `G` lesen. Der Eintrag in Spalte 0 beträgt rund $-0{,}065$. In der unteren Matrix ergibt jede Zeile durch ihr Skalarprodukt mit dem normierten Zustand und Addition des zugehörigen Bias eine der acht Query-Komponenten. Die Grafik zeigt gespeicherte Parameter des trainierten Fachmodells. Erst beim Lesen eines konkreten Textes entstehen daraus Queries und Keys für die einzelnen Positionen. [Gewichte des Fachmodells](../../results/model.nfg)
 
 Warum teilen wir das Skalarprodukt durch $\sqrt{d_h}$? Nimm als Überschlagsrechnung unabhängige, zentrierte Query- und Key-Komponenten mit Varianz eins an. Dann hat jedes Produkt $q_{t,i}k_{j,i}$ Varianz eins. Addiert man $d_h$ unabhängige Produkte, erhält die Summe Varianz $d_h$, ihre Standardabweichung wächst also wie $\sqrt{d_h}$. Der folgende Score hält die typische Größenordnung unter dieser Annahme konstant. Sonst könnte allein eine breitere Darstellung Softmax stärker auf den größten Wert zuspitzen. Für gelernte Komponenten ist die Unabhängigkeit eine Näherung.
@@ -155,7 +157,9 @@ Damit ist $N=(V+C)d+L(12d^2+13d)+2d$. Beim deutschen Bytemodell ergeben $V=258$,
 
 **Auflösung.** Die erste Zeile muss vollständig auf dem Startmarker liegen. Die zweite darf nur den Startmarker und das Byte `L` lesen. Im zweiten Block, ersten Kopf (im Befehl ab null gezählt) meldet die gespeicherte Messung für diese beiden Quellen ungefähr $0{,}412516$ und $0{,}587484$. Ihre Summe ist bis auf Rundung eins. Das Verhältnis erlaubt sogar einen Rückschluss auf die **Differenz** der beiden Scores, $\ln(0{,}587484/0{,}412516)\approx0{,}354$. Eine gemeinsame Konstante in den Scores ist aus dieser Messung prinzipiell unbestimmbar. [Vollständige Attention-Zeilen](../../results/attention.csv) · [Grafische Ansicht](../../figures/attention.svg)
 
-![Attention für den Prompt „Links: rot.“. Jede Zeile zeigt die Gewichte einer Query über die erlaubten früheren und aktuellen Positionen.](../../figures/attention.png)
+[![Attention für den Prompt „Links: rot.“. Jede Zeile zeigt die Gewichte einer Query über die erlaubten früheren und aktuellen Positionen.](../../figures/attention.gif)](../../figures/attention.svg)
+
+Verfolge die erste, dann die zweite Zeile. Wo beginnt jeweils die Schraffur für zukünftige Bytes? Grau schraffierte Felder sind durch die Schleifengrenze ausgeschlossen. Mit jeder neuen Query entsteht eine weitere gemessene Zeile. [Standbild als PDF](../../figures/attention.pdf) · [Messung](../../results/attention.csv)
 
 Suche die Zeile zum Buchstaben `t` und fahre von links nach rechts. Ihr dunkelstes Feld liegt in der Spalte `o` unmittelbar davor. In den Messdaten beträgt dieses Gewicht $0{,}711$. Der Kopf übernimmt also an dieser Stelle rund 71 Prozent seiner Mischung aus dem Value-Vektor bei `o`. Um daraus eine Vorhersage für das nächste Zeichen zu berechnen, braucht man auch die Value-Vektoren und die folgenden Schichten. Die grauen Felder sind durch die kausale Maske ausgeschlossen. [Messdaten für diese Abbildung](../../results/attention.csv)
 

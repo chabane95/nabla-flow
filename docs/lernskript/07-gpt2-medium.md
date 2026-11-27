@@ -2,7 +2,9 @@
 
 **Ja, für vier Fenster mit je 128 Tokens.** Eine RTX 4070 SUPER führte 64 vollständige Trainingsschritte eines zufällig initialisierten GPT-2 Medium mit **354.823.168 Parametern** aus. Die beiden großen CUDA-Speicherreservierungen des Trainers umfassten zusammen **6,25 GiB**. Die höchste beobachtete Belegung der *gesamten Karte* lag bei **7,92 GiB**. Um diese Zahlen einzuordnen, verfolgen wir ein Gewicht vom Checkpoint bis zu seinem ersten Update.
 
-![Zeitverlauf der gesamten Kartenbelegung und Aufteilung der vom Trainer reservierten Puffer](../../results/gpt2-medium-355m/memory.png)
+[![Links der zeitliche Verlauf der belegten GiB, rechts Kartenanstieg, CUDA-Delta und Trainersumme auf einer eigenen GiB-Skala.](../../results/gpt2-medium-355m/memory.png)](../../results/gpt2-medium-355m/memory.svg)
+
+**Abbildung 1.** Panel (a) zeigt 244 Abfragen der gesamten Karte. Das Quadrat markiert den Ausgangswert, das Dreieck die höchste gemessene Belegung. In Panel (b) steht das Dreieck für die Differenz aus beiden. Der offene Kreis zeigt den größten Zuwachs an den synchronisierten CUDA-Messpunkten gegenüber dem aktiven Kontext vor cuBLAS. Die Raute ist die aus dem Trainer berechnete Puffersumme. Die Ordinatenskalen unterscheiden sich. [Druckfassung](../../results/gpt2-medium-355m/memory.pdf) · [Animation der 244 Messpunkte](../../results/gpt2-medium-355m/memory.gif)
 
 Auf der Zeitachse liegt vor dem Anstieg auch die Erzeugung der Startgewichte auf der CPU. Der Abfall am Ende gehört zum Beenden des Trainers. Die Zeitachse stammt vom äußeren Messprogramm. Die interne Trainingsuhr startet erst nach der GPU-Initialisierung. [Messpunkte der Karte](../../results/gpt2-medium-355m/board-memory.csv) · [CUDA-Messpunkte](../../results/gpt2-medium-355m/memory.csv) · [Maschinenlesbares Versuchsprotokoll](../../results/gpt2-medium-355m/run.json)
 
@@ -93,6 +95,13 @@ Die fünf Zahlen nach `$run` bedeuten der Reihe nach **Updates, Fensterlänge, B
 ~~~powershell
 git lfs pull --include="results/gpt2-medium-355m/best.nfg"
 Get-FileHash -Algorithm SHA256 results/gpt2-medium-355m/best.nfg
+~~~
+
+Die veröffentlichte Abbildung und die Animation lassen sich aus den CSV-Dateien neu zeichnen. Das GIF spielt die Messpunkte ungefähr doppelt so schnell wie im Versuch ab und hält am Ende zwei Sekunden an. In welchem Zeitabschnitt entsteht der größte Teil des Anstiegs? Zwischen 6,34 und 6,55 Sekunden springt die Belegung von 1.643 auf 8.051 MiB.
+
+~~~powershell
+& $py tools/plot_medium_memory.py
+& $py tools/plot_medium_memory.py --out results/gpt2-medium-355m/memory.gif
 ~~~
 
 ## Kontrollfrage

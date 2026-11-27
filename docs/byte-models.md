@@ -32,6 +32,8 @@ The recall test scores the whole answer through its final period. The lab model 
 
 **Figure 1.** Cross-entropy during training on lab records (left) and Shakespeare (right). Both panels use the same logarithmic vertical scale. The blue curve uses a fixed sample of 64 training blocks. Red markers show the full validation set, and the open square marks the selected checkpoint. In the lab run, validation loss reaches its minimum at step 1,000 while training loss continues to fall.
 
+[Print figure](../figures/learning-curves.pdf) · [Lab measurements](../results/history.csv) · [Shakespeare measurements](../results/shakespeare/history.csv)
+
 The shared scale follows the two-panel comparison in Figure 4 of the Roberge–Weiss paper. The open symbols, used in Figure 5 of the resonance-suppression paper, also work in black and white. Each learning curve here comes from one run. [Chabane and Endrődi, Fig. 4](https://pos.sissa.it/396/097/pdf#page=6) · [Chabane et al., Fig. 5](https://doi.org/10.1103/PhysRevC.111.034913)
 
 ## From a bigram to self-attention
@@ -46,7 +48,7 @@ The inner loop in C stops at `j == i`. Even during training, the next character 
 
 [![Attention rows appear in input order. The area above the diagonal is masked.](../figures/attention.gif)](../figures/attention.svg)
 
-**Figure 2.** Attention in the second block, first head, for the German prompt `Links: rot.` (“Left: red.”), including the start token. Each row gives one query position and sums to one. The gray upper triangle is masked. The animation reveals the measured rows in input order on a fixed scale from 0 to 1. `␣` marks a space. A row shows how this particular head mixes its value vectors. [Measured weights](../results/attention.csv) · [Static vector figure](../figures/attention.svg)
+**Figure 2.** Attention in the second block, first head, for the German prompt `Links: rot.` (“Left: red.”), including the start token. Each row gives one query position and sums to one. The hatched upper triangle marks future positions. The animation reveals the measured rows in input order on a fixed scale from 0 to 1. The label `space` marks the space byte. A row shows how this particular head mixes its value vectors. [Measured weights](../results/attention.csv) · [Static vector figure](../figures/attention.svg) · [Print figure](../figures/attention.pdf)
 
 ## Inside a decoder block
 
@@ -70,6 +72,7 @@ To regenerate the figures from the C output, install NumPy, Matplotlib and Pillo
 ~~~sh
 python -m pip install -r requirements-plot.txt
 python tools/plot.py
+python tools/plot_byte_weights.py
 ~~~
 
 ## Pencil-and-paper exercises

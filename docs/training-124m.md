@@ -125,7 +125,9 @@ The sampler prints the new token IDs. It draws from the top 40 at temperature 0.
 & $py tools/report_124m.py --run $run --data $data --steps 2400 --out "$run/samples-report.json"
 ```
 
-The figure has 25 measurements from step zero to step 2,400. The report decodes every sample generated during training from the fixed prompt `ROMEO:` followed by a line feed. The last continuation reads “Now, that is the time of me to hear.” and ends with two line feeds and EOT. Its longest exact match within any training speech spans three consecutive BPE tokens. The comparison excludes the prompt and EOT. [Learning curves](../results/gpt2-124m/training.png) · [All samples and matching training sequences](../results/gpt2-124m/samples-report.json)
+The figure has 25 measurements from step zero to step 2,400. The inset enlarges the second half of training using the same units as panel (a). Panel (b) shows the exponential of the measured validation loss on a logarithmic axis. Each new animation frame adds a recorded evaluation. [Animation](../results/gpt2-124m/training.gif) · [Print figure](../results/gpt2-124m/training.pdf) · [Vector figure](../results/gpt2-124m/training.svg)
+
+The report decodes every sample generated during training from the fixed prompt `ROMEO:` followed by a line feed. The last continuation reads “Now, that is the time of me to hear.” and ends with two line feeds and EOT. Its longest exact match within any training speech spans three consecutive BPE tokens. The comparison excludes the prompt and EOT. [Learning curves](../results/gpt2-124m/training.png) · [All samples and matching training sequences](../results/gpt2-124m/samples-report.json)
 
 ## Numerical checks
 

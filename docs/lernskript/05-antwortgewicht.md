@@ -40,6 +40,10 @@ Bei festem Budget gewinnt der gewichtete Lauf auf der Validierung neun zuvor ung
 
 ### Welche Aufgabe profitiert?
 
+[![Doppeltreffer nach 1.800 Updates, getrennt für Validierung und Test, jeweils für alle Belegungen, Farben und Materialien.](../../results/answer-weight/paired-recall.png)](../../results/answer-weight/paired-recall.svg)
+
+**Abbildung 1.** Die Balkenhöhe gibt den Anteil der Belegungen mit zwei richtigen Antworten an. Über jedem Balken steht der gemessene Bruch. Der Nenner ist pro Teilaufgabe 14, über beide Teilaufgaben 28. Beide Panels verwenden dieselbe Skala. Vergleiche zuerst die beiden Gesamtbalken und dann die Verschiebungen innerhalb der Aufgaben. Welchen Effekt würdest du übersehen, wenn du nur den Testsatz als Ganzes anschaust? [Druckfassung](../../results/answer-weight/paired-recall.pdf) · [Abbildung aus den Rohdaten erzeugen](../../tools/plot_answer_weight.py)
+
 | Belegungstyp bei Schritt 1.800 | Validierung 1× → 4× | Test 1× → 4× |
 | --- | ---: | ---: |
 | Farben mit `Links` und `Rechts` | 1/14 → **10/14** | 3/14 → **6/14** |

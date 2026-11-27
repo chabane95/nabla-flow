@@ -20,6 +20,10 @@ Genau dieses Experiment steckt im Datensatz. Beim Prompt `Fach A: Glas. Fach B: 
 
 Bearbeite Kapitel 1 und 2 mit einem Blatt Papier. Für Kapitel 3 lohnt es sich, in den eigenen Formeln jedes mehrfach verwendete Gewicht zu markieren. Im Labor schreibe vor dem Start des Programms einen Satz der Form „Wenn meine Erklärung stimmt, muss sich bei diesem Eingriff … ändern“ und daneben ein Ergebnis, das dich zum Umdenken bringen würde.
 
+## Den Versuch jemandem erklären
+
+Zeige einer zweiten Person eine richtige Antwort des Fachmodells und bitte sie um eine zweite Frage, mit der sie ihre Erklärung widerlegen könnte. Für einen kurzen Vortrag kannst du anschließend genau einen der drei Versuche auswählen. Zu jeder Animation stehen die Messdaten und eine mögliche Gegenfrage in der Werkstattnotiz. [Werkstattnotiz](../werkstattnotiz.md)
+
 ## Beim Lesen des Codes
 
 Die kleinste vollständige Schleife für das Byte-Modell steht in `train`. Verfolge dort einen einzigen Block. `x` zeigt auf das erste Eingabetoken, `x+1` auf die verschobenen Ziele. `gpt_forward` berechnet die Scores für alle Positionen, `gpt_backward` sammelt die Beiträge zum Gradienten und `gpt_step` aktualisiert nach mehreren Blöcken die Gewichte. Folge beim ersten Durchgang nur diesen vier Stellen. Die Reihenfolge, in der das Programm rechnet, ist dieselbe wie im Skript. [Trainingsschleife](../../src/main.c) · [Schnittstelle mit Konventionen für Summen und Mittelwerte](../../src/gpt.h)
