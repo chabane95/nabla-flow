@@ -1,0 +1,57 @@
+{
+  "architecture": {
+    "name": "GPT-2 Medium",
+    "parameters": 354823168,
+    "vocab": 50257,
+    "position_table": 1024,
+    "width": 1024,
+    "heads": 16,
+    "blocks": 24,
+    "mlp_width": 4096,
+    "parameter_dtype": "float32"
+  },
+  "training": {
+    "start": "random",
+    "seed": 42,
+    "corpus": "Tiny Shakespeare",
+    "input_u16le_sha256": {
+      "val": "57ee490f58fc073c4c07f703cc86c4cb877b731d3efb009e93c76c67edfa56c0",
+      "train": "2aeea0da9f1bf26b6244ab22f41444ccf185c49dd9785c3c2cf650e71bb7bb02",
+      "prompt": "9e5af260e5d84b7dec12a6ee03e1df448e21db7a5d2918d74b3c72caab43c538"
+    },
+    "steps": 64,
+    "window": 128,
+    "batch": 4,
+    "eval_every": 32,
+    "targets_processed": 32768,
+    "validation_targets": 13106,
+    "selected_step": 64,
+    "initial_val_nll": 11.0961336,
+    "selected_val_nll": 6.36461656
+  },
+  "environment": {
+    "platform": "Windows x64",
+    "gpu": "NVIDIA GeForce RTX 4070 SUPER",
+    "driver": "591.86",
+    "total_mib": 12282,
+    "compiler": "GCC 14.2.0 (MSYS2 UCRT64)",
+    "cublas": "12.9.2.10",
+    "nvrtc": "12.9.86"
+  },
+  "board_monitor": {
+    "device_index": 0,
+    "requested_poll_ms": 100,
+    "samples": 244,
+    "before_mib": 1450,
+    "observed_peak_mib": 8111,
+    "peak_minus_before_mib": 6661,
+    "free_at_peak_mib": 3889,
+    "after_mib": 1423,
+    "last_sample_s": 25.094
+  },
+  "checkpoint": {
+    "file": "best.nfg",
+    "bytes": 1419292972,
+    "sha256": "c304afbd0dc7a211fac4dbecfeaef0a39fa630b9ec81c47eb1b8a0c3f3afa851"
+  }
+}

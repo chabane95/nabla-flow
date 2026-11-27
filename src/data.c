@@ -108,6 +108,31 @@ int corpus_load(Corpus *c, const char *path, int context)
     return ok;
 }
 
+int *corpus_answer_weights(const Corpus *c, int factor)
+{
+    size_t count = c->targets + c->records;
+    if (factor < 1) return NULL;
+    int *weights = malloc(count * sizeof(*weights));
+    if (!weights) return NULL;
+    for (size_t i = 0; i < count; ++i) weights[i] = 1;
+    size_t record = 0;
+    for (size_t eos = 0; eos < count; ++eos) {
+        if (c->tokens[eos] != NF_EOS) continue;
+        if (eos < record + 4 || c->tokens[eos-1] != '.') goto invalid;
+        size_t end = eos-1, start = end;
+        while (start > record+1 && c->tokens[start-1] != ' ' && c->tokens[start-1] != '\t')
+            --start;
+        if (start == end || start == record+1) goto invalid;
+        for (size_t i = start; i < end; ++i) weights[i] = factor;
+        record = eos + 1;
+    }
+    return weights;
+invalid:
+    fprintf(stderr,"Missing final space-delimited answer word and period in training record.\n");
+    free(weights);
+    return NULL;
+}
+
 double bigram_nll(const Corpus *train, const Corpus *test)
 {
     /* Same 258-symbol output alphabet as the GPT; add-0.1 smoothing. */
@@ -136,13 +161,27 @@ double bigram_nll(const Corpus *train, const Corpus *test)
     return loss / (double)test->targets;
 }
 
+static int test_answer_weights(void)
+{
+    static const unsigned char text[] = "X A\xc3\xa4.\r\nY B.";
+    static const int expected[] = {1,1,1,4,4,4,1,1,1,1,1,4,1,1};
+    Corpus c = {0};
+    int ok = from_bytes(&c,text,sizeof(text)-1,2);
+    int *weights = ok ? corpus_answer_weights(&c,4) : NULL;
+    ok = weights && c.targets+c.records == sizeof(expected)/sizeof(*expected) &&
+         memcmp(weights,expected,sizeof(expected)) == 0;
+    free(weights);
+    corpus_free(&c);
+    return ok;
+}
+
 int data_selftest(void)
 {
     static const unsigned char raw[] = "\xef\xbb\xbf" "Ab\r\n\n" "\xc3\xa4" "x";
     static const unsigned char bad[] = {0xed, 0xa0, 0x80};
     static const int tokens[] = {NF_BOS,65,98,NF_EOS,NF_BOS,195,164,120,NF_EOS};
     Corpus c = {0}, invalid = {0};
-    int ok = from_bytes(&c, raw, sizeof(raw)-1, 2) && c.records == 2 && c.targets == 7 &&
+    int ok = test_answer_weights() && from_bytes(&c, raw, sizeof(raw)-1, 2) && c.records == 2 && c.targets == 7 &&
              c.block_count == 4 && memcmp(c.tokens, tokens, sizeof(tokens)) == 0 &&
              c.blocks[0].start == 0 && c.blocks[0].length == 2 &&
              c.blocks[1].start == 2 && c.blocks[1].length == 1 &&
@@ -156,6 +195,6 @@ int data_selftest(void)
     }
     corpus_free(&invalid);
     corpus_free(&c);
-    printf("UTF-8, boundaries, block targets, bigram likelihood: %s\n", ok ? "ok" : "FAILED");
+    printf("UTF-8, boundaries, block targets, answer weights, bigram likelihood: %s\n", ok ? "ok" : "FAILED");
     return ok;
 }

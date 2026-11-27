@@ -2,6 +2,7 @@
    Uses the CUDA Driver API, NVRTC and cuBLAS via their stable C entry points.
    The host and the device exchange only tokens, metrics and requested weights. */
 #include "gpu.h"
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -36,6 +37,8 @@ typedef struct {
     int (*retain)(void **,int);
     int (*release)(int);
     int (*current)(void *);
+    int (*synchronize)(void);
+    int (*memory_info)(size_t *,size_t *);
     int (*alloc)(Dev *,size_t);
     int (*dealloc)(Dev);
     int (*upload)(Dev,const void *,size_t);
@@ -92,6 +95,7 @@ static int load_api(void)
     FIND(driver,init,"cuInit"); FIND(driver,device,"cuDeviceGet");
     FIND(driver,attribute,"cuDeviceGetAttribute"); FIND(driver,retain,"cuDevicePrimaryCtxRetain");
     FIND(driver,release,"cuDevicePrimaryCtxRelease_v2"); FIND(driver,current,"cuCtxSetCurrent");
+    FIND(driver,synchronize,"cuCtxSynchronize"); FIND(driver,memory_info,"cuMemGetInfo_v2");
     FIND(driver,alloc,"cuMemAlloc_v2"); FIND(driver,dealloc,"cuMemFree_v2");
     FIND(driver,upload,"cuMemcpyHtoD_v2"); FIND(driver,download,"cuMemcpyDtoH_v2");
     FIND(driver,zero,"cuMemsetD32_v2"); FIND(driver,load,"cuModuleLoadData");
@@ -134,6 +138,9 @@ struct GPUModel {
     GptConfig c;
     int device,max_b,max_t,last_b,last_t,has_logits,compute;
     size_t count,matrices,stride;
+    FILE *memory_csv;
+    size_t baseline_used,training_bytes,arena_bytes;
+    int has_baseline;
     uint64_t steps,tokens;
     void *context,*module,*blas,*kernel[N_KERNELS];
     Dev training,arena,weights,grad,m,v,input,target,loss,hidden,final,mean,inv,logits;
@@ -204,6 +211,24 @@ static Dev take(Dev *cursor,size_t floats)
     return result;
 }
 
+int gpu_measure_memory(GPUModel *g,const char *phase,uint64_t step)
+{
+    if (!g || !phase) return 0;
+    if (!g->memory_csv) return 1;
+    size_t available,total;
+    if (!CUDA(synchronize()) || !CUDA(memory_info(&available,&total)) || available>total)
+        return 0;
+    size_t used=total-available;
+    if (!g->has_baseline) {
+        g->baseline_used=used;
+        g->has_baseline=1;
+    }
+    int64_t delta=(int64_t)used-(int64_t)g->baseline_used;
+    return fprintf(g->memory_csv,"%" PRIu64 ",%s,%zu,%zu,%zu,%" PRId64 ",%zu,%zu\n",
+                   step,phase,total,available,used,delta,g->training_bytes,g->arena_bytes)>=0 &&
+           fflush(g->memory_csv)==0;
+}
+
 static int allocate_state(GPUModel *g)
 {
     GptConfig c=g->c;
@@ -218,6 +243,8 @@ static int allocate_state(GPUModel *g)
     g->host_loss=malloc(n*sizeof(float));
     if (!g->cache || !g->host_loss || !CUDA(alloc(&g->training,16*g->count)) ||
         !CUDA(alloc(&g->arena,4*total))) return 0;
+    g->training_bytes=16*g->count;
+    g->arena_bytes=4*total;
     Dev p=g->training;
     g->weights=take(&p,g->count); g->grad=take(&p,g->count); g->m=take(&p,g->count); g->v=take(&p,g->count);
     if (!CUDA(zero(g->grad,0,3*g->count))) return 0;
@@ -239,6 +266,11 @@ static int allocate_state(GPUModel *g)
 
 GPUModel *gpu_create(const Gpt *src,int b,int t)
 {
+    return gpu_create_profiled(src,b,t,NULL);
+}
+
+GPUModel *gpu_create_profiled(const Gpt *src,int b,int t,FILE *memory_csv)
+{
     if (sizeof(void*)!=8 || !src || !src->parameters || src->parameter_count==0 ||
         src->parameter_count!=gpt_parameter_count(src->config) || b<1 || t<1 ||
         t>src->config.context || (int64_t)b*t>INT_MAX || !load_api()) return NULL;
@@ -248,12 +280,20 @@ GPUModel *gpu_create(const Gpt *src,int b,int t)
     int d=g->c.width;
     g->matrices=(size_t)(g->c.vocab_size+g->c.context)*d+12u*g->c.layers*(size_t)d*d;
     g->max_b=b; g->max_t=t;
+    g->memory_csv=memory_csv;
+    if (memory_csv && fputs("step,phase,device_total_bytes,device_free_bytes,device_used_bytes,"
+                            "delta_from_context_bytes,training_buffer_bytes,arena_bytes\n",memory_csv)==EOF) {
+        gpu_destroy(g);
+        return NULL;
+    }
     /* cublasComputeType_t values from CUDA 12 cublas_api.h. FAST_TF32
        enables Tensor Cores while retaining float storage and accumulation. */
     g->compute=d>=64?77:68;
     if (!CUDA(init(0)) || !CUDA(device(&g->device,0)) || !CUDA(retain(&g->context,g->device)) ||
-        !CUDA(current(g->context)) || api.make_blas(&g->blas) || !compile_kernels(g) ||
-        !allocate_state(g) || !CUDA(upload(g->weights,src->parameters,4*g->count))) {
+        !CUDA(current(g->context)) || !gpu_measure_memory(g,"context_baseline",g->steps) ||
+        api.make_blas(&g->blas) || !compile_kernels(g) || !gpu_measure_memory(g,"libraries_ready",g->steps) ||
+        !allocate_state(g) || !CUDA(upload(g->weights,src->parameters,4*g->count)) ||
+        !gpu_measure_memory(g,"buffers_ready",g->steps)) {
         gpu_destroy(g);
         return NULL;
     }

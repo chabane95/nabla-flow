@@ -3,6 +3,7 @@
 #include "gpt.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -24,7 +25,7 @@ int recall_command(int argc, char **argv);
 static const char *usage =
     "nablaflow train [--train data/train.txt --val data/val.txt --out run]\n"
     "                [--steps 600 --batch 8 --ctx 32 --width 32 --heads 4 --layers 1]\n"
-    "                [--lr 0.002 --eval-every 25 --seed 42]\n"
+    "                [--lr 0.002 --eval-every 25 --seed 42 --answer-weight 1 --save-final 0]\n"
     "nablaflow sample --model FILE [--prompt TEXT --tokens 80 --temperature 0.7 --top-k 8 --seed 7]\n"
     "nablaflow inspect --model FILE [--prompt TEXT --layer 0 --head 0]\n"
     "nablaflow eval --model FILE --data TEXTFILE [--train TEXTFILE]\n"
@@ -89,12 +90,13 @@ typedef struct {
     uint32_t seed;
     double lr;
     GptConfig config;
+    int answer_weight, save_final;
 } TrainOptions;
 
 static int train_options(TrainOptions *p, int argc, char **argv)
 {
     *p = (TrainOptions){"data/train.txt","data/val.txt","run",600,8,25,42,0.002,
-                        {NF_VOCAB,32,32,4,1}};
+                        {NF_VOCAB,32,32,4,1},1,0};
     for (int i = 2; i < argc; i += 2) {
         const char *k = argv[i], *v = argv[i+1];
         if (!v || !*v) return 0;
@@ -108,6 +110,8 @@ static int train_options(TrainOptions *p, int argc, char **argv)
         else if (!strcmp(k,"--width") && integer(v,2,768,&p->config.width)) continue;
         else if (!strcmp(k,"--heads") && integer(v,1,768,&p->config.heads)) continue;
         else if (!strcmp(k,"--layers") && integer(v,1,24,&p->config.layers)) continue;
+        else if (!strcmp(k,"--answer-weight") && integer(v,1,INT_MAX,&p->answer_weight)) continue;
+        else if (!strcmp(k,"--save-final") && integer(v,0,1,&p->save_final)) continue;
         else if (!strcmp(k,"--seed") && seed_value(v,&p->seed)) continue;
         else if (!strcmp(k,"--lr") && real(v,&p->lr) && p->lr > 0) continue;
         else return 0;
@@ -167,10 +171,14 @@ static int train(const TrainOptions *o)
     FILE *hist = NULL, *summary = NULL;
     size_t *order = NULL, cursor = 0;
     float *best = NULL;
+    int *weights = NULL;
     char *mp = join(o->out,"model.nfg"), *hp = join(o->out,"history.csv"), *sp = join(o->out,"summary.csv");
     if (!mp || !hp || !sp || !corpus_load(&tr,o->train,o->config.context) ||
         !corpus_load(&va,o->val,o->config.context) || !gpt_init(&g,o->config,o->seed))
         goto done;
+    if (o->answer_weight != 1 && !(weights = corpus_answer_weights(&tr, o->answer_weight)))
+        goto done;
+    uint64_t initial_hash = checkpoint_parameter_hash(&g);
     double baseline = bigram_nll(&tr,&va);
     double best_val = HUGE_VAL, initial = 0, norm = 0, lr = 0;
     size_t train_probe = tr.block_count < 64 ? tr.block_count : 64, probe_tokens = 0;
@@ -196,7 +204,9 @@ static int train(const TrainOptions *o)
                 }
                 Block block = tr.blocks[order[cursor++]];
                 const int *x = tr.tokens + block.start;
-                if (!gpt_forward(&g,x,block.length) || !isfinite(gpt_backward(&g,x+1)))
+                const int *target_weights = weights ? weights + block.start + 1 : NULL;
+                if (!gpt_forward(&g,x,block.length) ||
+                    !isfinite(gpt_backward_weighted(&g,x+1,target_weights)))
                     goto done;
             }
             lr = learning_rate(step,o->steps,o->lr);
@@ -218,6 +228,12 @@ static int train(const TrainOptions *o)
         printf("step %d/%d  train %.4f  val %.4f\n",step,o->steps,t,v);
         fflush(stdout);
     }
+    if (o->save_final) {
+        char *path = join(o->out,"final.nfg");
+        int saved = path && checkpoint_save(path,&g,tr.seen);
+        free(path);
+        if (!saved) goto done;
+    }
     memcpy(g.parameters,best,g.parameter_count * sizeof(*best));
     if (!checkpoint_save(mp,&g,tr.seen)) {
         fprintf(stderr,"Could not save %s\n",mp);
@@ -227,19 +243,20 @@ static int train(const TrainOptions *o)
     if (!summary) goto done;
     fputs("seed,steps,best_step,train_records,val_records,train_tokens,val_tokens,parameters,"
           "initial_val_nll,best_val_nll,bigram_val_nll,bigram_val_ppl,"
-          "context,width,heads,layers,batch,peak_lr,eval_every,train_probe_blocks,train_probe_tokens\n",summary);
+          "context,width,heads,layers,batch,peak_lr,eval_every,train_probe_blocks,train_probe_tokens,"
+          "answer_weight,initial_parameters_fnv1a64\n",summary);
     fprintf(summary,"%u,%d,%d,%zu,%zu,%zu,%zu,%zu,%.12g,%.12g,%.12g,%.12g,"
-                    "%d,%d,%d,%d,%d,%.12g,%d,%zu,%zu\n",
+                    "%d,%d,%d,%d,%d,%.12g,%d,%zu,%zu,%d,%016" PRIx64 "\n",
             (unsigned)o->seed,o->steps,best_step,tr.records,va.records,tr.targets,va.targets,g.parameter_count,
             initial,best_val,baseline,exp(baseline),o->config.context,o->config.width,o->config.heads,
-            o->config.layers,o->batch,o->lr,o->eval_every,train_probe,probe_tokens);
+            o->config.layers,o->batch,o->lr,o->eval_every,train_probe,probe_tokens,o->answer_weight,initial_hash);
     printf("selected step %d | validation NLL %.5f | bigram NLL %.5f\n",best_step,best_val,baseline);
     ok = 1;
 done:
     if (hist && !close_file(hist)) ok = 0;
     if (summary && !close_file(summary)) ok = 0;
     if (!ok) fputs("Training failed. Check the inputs, model configuration and output directory.\n",stderr);
-    free(mp); free(hp); free(sp); free(best); free(order);
+    free(mp); free(hp); free(sp); free(best); free(order); free(weights);
     gpt_free(&g); corpus_free(&tr); corpus_free(&va);
     return ok;
 }

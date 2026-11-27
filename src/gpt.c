@@ -101,7 +101,7 @@ static void initialize(Gpt *model, uint32_t seed)
 size_t gpt_parameter_count(GptConfig c)
 {
     if (c.vocab_size < 2 || c.vocab_size > 65536 ||
-        c.context < 1 || c.context > 2048 || c.width < 2 || c.width > 768 ||
+        c.context < 1 || c.context > 2048 || c.width < 2 || c.width > 1024 ||
         c.heads < 1 || c.heads > c.width || c.width % c.heads ||
         c.layers < 1 || c.layers > 24)
         return 0;
@@ -407,13 +407,19 @@ static void attention_backward(Cache *a, GptConfig c, int length,
 
 /* The loss uses the shifted logits directly; target probabilities need never
    be logged and may safely underflow to zero. */
-static double token_objective(Gpt *model, const int *targets, int differentiate)
+static double token_objective(Gpt *model, const int *targets, const int *weights, uint64_t *mass)
 {
     if (!model || !model->state || !targets || model->state->length < 1) return NAN;
     State *s = model->state;
     const int v = model->config.vocab_size, d = model->config.width;
-    for (int t = 0; t < s->length; ++t)
-        if (targets[t] < 0 || targets[t] >= v) return NAN;
+    uint64_t total = 0;
+    for (int t = 0; t < s->length; ++t) {
+        int weight = weights ? weights[t] : 1;
+        if (targets[t] < 0 || targets[t] >= v || weight < 1) return NAN;
+        total += (uint64_t)weight;
+    }
+    if (mass && total > UINT64_MAX - s->accumulated) return NAN;
+    if (mass) *mass = total;
     double loss = 0.0;
     for (int t = 0; t < s->length; ++t) {
         const float *logits = s->logits + (size_t)t*v;
@@ -422,38 +428,46 @@ static double token_objective(Gpt *model, const int *targets, int differentiate)
         double sum = 0.0;
         for (int j = 0; j < v; ++j) {
             double e = exp((double)logits[j] - max);
-            if (differentiate) s->dlogit[j] = (float)e;
+            if (mass) s->dlogit[j] = (float)e;
             sum += e;
         }
-        loss += ((double)max - logits[targets[t]]) + log(sum);
-        if (differentiate) {
+        int weight = weights ? weights[t] : 1;
+        loss += weight * (((double)max - logits[targets[t]]) + log(sum));
+        if (mass) {
             float inverse = (float)(1.0/sum);
             for (int j = 0; j < v; ++j) s->dlogit[j] *= inverse;
             s->dlogit[targets[t]] -= 1.0f;
+            if (weight != 1)
+                for (int j = 0; j < v; ++j) s->dlogit[j] *= weight;
             dense_backward(s->final+t*d, model->parameters, s->dlogit, s->grad,
                            NULL, s->dn+t*d, 1, d, v);
         }
     }
-    return loss/s->length;
+    return loss/(double)total;
 }
 
 double gpt_loss(Gpt *model, const int *targets)
 {
-    return token_objective(model, targets, 0);
+    return token_objective(model, targets, NULL, NULL);
 }
 
 double gpt_backward(Gpt *model, const int *targets)
+{
+    return gpt_backward_weighted(model, targets, NULL);
+}
+
+double gpt_backward_weighted(Gpt *model, const int *targets, const int *weights)
 {
     if (!model || !model->state || model->state->length < 1) return NAN;
     GptConfig c = model->config;
     State *s = model->state;
     int length = s->length, d = c.width;
-    if ((uint64_t)length > UINT64_MAX - s->accumulated) return NAN;
     if (!s->grad) {
         s->grad = calloc(model->parameter_count, sizeof(float));
         if (!s->grad) return NAN;
     }
-    double loss = token_objective(model, targets, 1);
+    uint64_t mass;
+    double loss = token_objective(model, targets, weights, &mass);
     if (!isfinite(loss)) return NAN;
     size_t stride = (size_t)s->capacity*d;
     float *gamma = final_gamma(model, model->parameters);
@@ -494,7 +508,7 @@ double gpt_backward(Gpt *model, const int *targets)
             dpos[t*d+i] += s->dx[t*d+i];
         }
     }
-    s->accumulated += (uint64_t)length;
+    s->accumulated += mass;
     return loss;
 }
 
@@ -652,6 +666,35 @@ static int test_optimizer(Gpt *model)
     return ok;
 }
 
+/* Weight four on the first target is equivalent to scoring its causal prefix
+   three extra times. Check the full gradient, not just the loss. */
+static int test_weighted_backward(Gpt *model)
+{
+    const int input[] = {2,7}, targets[] = {7,1}, weights[] = {4,1};
+    size_t n = model->parameter_count;
+    float *weighted_grad = malloc(n * sizeof(*weighted_grad));
+    if (!weighted_grad) return 0;
+    int ok = 0;
+    gpt_zero_grad(model);
+    if (!gpt_forward(model,input,2)) goto done;
+    double weighted = gpt_backward_weighted(model,targets,weights);
+    if (!isfinite(weighted) || model->state->accumulated != 5) goto done;
+    memcpy(weighted_grad,model->state->grad,n*sizeof(*weighted_grad));
+    gpt_zero_grad(model);
+    double reference = 2*gpt_backward(model,targets);
+    if (!gpt_forward(model,input,1)) goto done;
+    for (int i = 0; i < 3; ++i) reference += gpt_backward(model,targets);
+    if (!isfinite(reference) || fabs(weighted-reference/5.0) > 1e-10 ||
+        model->state->accumulated != 5) goto done;
+    for (size_t i = 0; i < n; ++i)
+        if (fabs(weighted_grad[i]-model->state->grad[i]) >
+            2e-5 * (1.0+fabs(weighted_grad[i]))) goto done;
+    ok = 1;
+done:
+    free(weighted_grad);
+    return ok;
+}
+
 static int test_stable_loss(Gpt *model)
 {
     int token = 0, target = 1;
@@ -669,8 +712,9 @@ static int test_stable_loss(Gpt *model)
 int gpt_selftest(void)
 {
     Gpt model = {0};
-    GptConfig tiny = {11,5,6,2,2}, full = {50257,1024,768,12,12};
-    if (gpt_parameter_count(full) != 124439808 || !gpt_init(&model,tiny,17)) {
+    GptConfig tiny = {11,5,6,2,2}, small = {50257,1024,768,12,12}, medium = {50257,1024,1024,16,24};
+    if (gpt_parameter_count(small) != 124439808 || gpt_parameter_count(medium) != 354823168 ||
+        !gpt_init(&model,tiny,17)) {
         fprintf(stderr,"Unexpected parameter count or model initialization failed.\n");
         return 0;
     }
@@ -681,6 +725,7 @@ int gpt_selftest(void)
     if (!test_causality(&model)) fprintf(stderr,"Causality check failed.\n");
     else if (!test_gradients(&model)) fprintf(stderr,"Gradient check failed.\n");
     else if (!test_optimizer(&model)) fprintf(stderr,"AdamW or gradient clipping check failed.\n");
+    else if (!test_weighted_backward(&model)) fprintf(stderr,"Weighted loss or gradient check failed.\n");
     else if (!test_stable_loss(&model)) fprintf(stderr,"Softmax stability check failed.\n");
     else {
         puts("Causal mask, prefix logits, softmax, per-token averaging, clipping, and AdamW: OK");

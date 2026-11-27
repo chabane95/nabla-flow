@@ -29,10 +29,13 @@ int gpt_attention_row(const Gpt *model, int layer, int head, int position, float
    backward also accumulates the SUM of the token gradients for this sequence. */
 double gpt_loss(Gpt *model, const int *targets);
 double gpt_backward(Gpt *model, const int *targets);
+/* Positive integer weight per target (NULL means all ones). Returns weighted
+   mean loss. AdamW normalizes accumulated gradient sums by total weight. */
+double gpt_backward_weighted(Gpt *model, const int *targets, const int *weights);
 /* Raw accumulated gradient sums in parameter order; NULL before first backward. */
 const float *gpt_gradient(const Gpt *model);
 void gpt_zero_grad(Gpt *model);
-/* Average across all accumulated tokens, clip global L2 norm, then AdamW.
+/* Divide by accumulated target weight, clip global L2 norm, then AdamW.
    clip_norm == 0 disables clipping. grad_norm optionally receives the raw
    norm of the mean gradient. A successful step clears accumulated gradients. */
 int gpt_step(Gpt *model, double lr, double weight_decay, double clip_norm, double *grad_norm);

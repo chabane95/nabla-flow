@@ -1,4 +1,4 @@
-/* Train the repository's GPT-2 Small on uint16-LE token streams. The GPU
+/* Train GPT-2 Small or Medium on uint16-LE token streams. The GPU
    batch is contiguous [batch,time]. CPU and GPU share a checkpoint layout. */
 #if !defined(_WIN32)
 #define _POSIX_C_SOURCE 200809L
@@ -33,7 +33,9 @@ static double seconds(void) {
 }
 #endif
 
-static const GptConfig small = {50257,1024,768,12,12};
+enum { GPT2_VOCAB = 50257, GPT2_CONTEXT = 1024, GPT2_EOT = 50256 };
+static const GptConfig small = {GPT2_VOCAB,GPT2_CONTEXT,768,12,12};
+static const GptConfig medium = {GPT2_VOCAB,GPT2_CONTEXT,1024,16,24};
 typedef struct { uint16_t *ids; size_t count; } Shard;
 typedef struct { int *x, *y, batch, window; } Buffers;
 
@@ -61,7 +63,7 @@ static int load(Shard *s, const char *path)
         unsigned char *raw = (unsigned char *)s->ids;
         for (size_t i=0;i<n;++i) {
             unsigned id = raw[2*i] | ((unsigned)raw[2*i+1]<<8);
-            if (id >= 50257) { ok=0; break; }
+            if (id >= GPT2_VOCAB) { ok=0; break; }
             s->ids[i] = (uint16_t)id;
         }
     }
@@ -134,7 +136,7 @@ static int sample_token(const float *z,uint64_t *rng)
 {
     enum { k=40 };
     int order[k], count=0;
-    for (int v=0;v<small.vocab_size;++v) {
+    for (int v=0;v<GPT2_VOCAB;++v) {
         if (!isfinite(z[v])) return -1;
         if (count==k && z[v]<=z[order[k-1]]) continue;
         int i=count<k ? count++ : k-1;
@@ -153,8 +155,8 @@ static int sample_token(const float *z,uint64_t *rng)
 
 static int sample(GPUModel *g,const Shard *prompt,int cap,int count,FILE *f)
 {
-    int ctx[1024];
-    float *logits=malloc((size_t)small.vocab_size*sizeof(*logits));
+    int ctx[GPT2_CONTEXT];
+    float *logits=malloc((size_t)GPT2_VOCAB*sizeof(*logits));
     int ok=logits && prompt->count && prompt->count<=(size_t)cap;
     int n=ok ? (int)prompt->count : 0;
     for (int i=0;i<n;++i) ctx[i]=prompt->ids[i];
@@ -164,7 +166,7 @@ static int sample(GPUModel *g,const Shard *prompt,int cap,int count,FILE *f)
         int token=ok ? sample_token(logits,&state) : -1;
         if (token<0) { ok=0; break; }
         fprintf(f,"%s%d",j?" ":"",token);
-        if (token==50256) break;
+        if (token==GPT2_EOT) break;
         if (n==cap) { memmove(ctx,ctx+1,(size_t)(cap-1)*sizeof(int)); --n; }
         ctx[n++]=token;
     }
@@ -192,12 +194,18 @@ static double learning_rate(int step,int steps)
 static int train(int argc,char **argv)
 {
     int steps,window,batch,interval,seed;
-    if (argc!=11 || !integer(argv[5],1,10000000,&steps) || !integer(argv[6],1,1024,&window) ||
+    if ((argc!=11 && argc!=12) || !integer(argv[5],1,10000000,&steps) ||
+        !integer(argv[6],1,GPT2_CONTEXT,&window) ||
         !integer(argv[7],1,64,&batch) || !integer(argv[8],1,10000000,&interval) ||
         !integer(argv[9],0,INT_MAX,&seed)) return 0;
+    const char *name=argc==12 ? argv[11] : "small";
+    GptConfig config;
+    if (!strcmp(name,"small")) config=small;
+    else if (!strcmp(name,"medium")) config=medium;
+    else return 0;
     Shard tr={0},va={0},pr={0};
     Gpt host={0}; GPUModel *g=NULL; Buffers buf={0};
-    FILE *history=NULL,*samples=NULL,*batches=NULL;
+    FILE *history=NULL,*samples=NULL,*batches=NULL,*memory=NULL;
     char *weights=NULL,*histpath=NULL,*samplepath=NULL,*batchpath=NULL;
     int ok=0, best_step=0; double best=HUGE_VAL, norm=0, lr=0;
     if (!strcmp(argv[2],argv[3]) || !load(&tr,argv[2]) || !load(&va,argv[3]) || !load(&pr,argv[10]) ||
@@ -205,10 +213,18 @@ static int train(int argc,char **argv)
         !buffers(&buf,batch,window) || create_dir(argv[4]) != 0) goto done;
     weights=join(argv[4],"best.nfg"); histpath=join(argv[4],"history.csv");
     samplepath=join(argv[4],"samples.csv"); batchpath=join(argv[4],"batches.csv");
+    if (config.width==medium.width) {
+        char *path=join(argv[4],"memory.csv");
+        if (path) memory=fopen(path,"w");
+        free(path);
+        if (!memory) goto done;
+    }
     if (!weights || !histpath || !samplepath || !batchpath ||
         !(history=fopen(histpath,"w")) || !(samples=fopen(samplepath,"w")) ||
-        !(batches=fopen(batchpath,"w")) || !gpt_init(&host,small,(uint32_t)seed) ||
-        !(g=gpu_create(&host,batch,window))) goto done;
+        !(batches=fopen(batchpath,"w")) || !gpt_init(&host,config,(uint32_t)seed) ||
+        !(g=gpu_create_profiled(&host,batch,window,memory))) goto done;
+    printf("GPT-2 %s | %zu parameters | width %d | heads %d | blocks %d\n",
+           name,host.parameter_count,config.width,config.heads,config.layers);
     fputs("step,tokens,train_nll,val_nll,lr,grad_norm,elapsed_seconds\n",history);
     fputs("step,generated_ids\n",samples);
     fputs("step,tokens,batch_nll,lr,grad_norm\n",batches);
@@ -222,8 +238,11 @@ static int train(int argc,char **argv)
                 copy_pair(&buf,&tr,pos,b,window);
             }
             double loss=gpu_pass(g,buf.x,buf.y,batch,window,1);
+            int measure=memory && (step==1 || step%interval==0 || step==steps);
             lr=learning_rate(step,steps);
-            if (!isfinite(loss) || !gpu_update(g,lr,0.1,1.0,&norm) || !isfinite(norm)) goto done;
+            if (!isfinite(loss) || (measure && !gpu_measure_memory(g,"after_backward",step)) ||
+                !gpu_update(g,lr,0.1,1.0,&norm) || !isfinite(norm) ||
+                (measure && !gpu_measure_memory(g,"after_update",step))) goto done;
             fprintf(batches,"%d,%llu,%.9g,%.9g,%.9g\n",step,(unsigned long long)tokens,loss,lr,norm);
             if (step%10==0 || step==steps) {
                 fflush(batches);
@@ -234,7 +253,8 @@ static int train(int argc,char **argv)
         }
         if (step%interval && step!=steps) continue;
         double tr_loss=probe_train(g,&buf,&tr), val=evaluate(g,&buf,&va);
-        if (!isfinite(tr_loss) || !isfinite(val)) goto done;
+        if (!isfinite(tr_loss) || !isfinite(val) || !gpu_measure_memory(g,"after_validation",step))
+            goto done;
         fprintf(history,"%d,%llu,%.9g,%.9g,%.9g,%.9g,%.3f\n",step,(unsigned long long)tokens,
                 tr_loss,val,lr,norm,seconds()-start);
         fflush(history);
@@ -250,10 +270,11 @@ static int train(int argc,char **argv)
         fprintf(samples,"%d,",step);
         if (!sample(g,&pr,window,64,samples)) goto done;
         fputc('\n',samples); fflush(samples);
-        if (ferror(samples)) goto done;
+        if (ferror(samples) || !gpu_measure_memory(g,"after_sampling",step)) goto done;
     }
     ok=1;
 done:
+    if (memory && fclose(memory)) ok=0;
     if (samples && fclose(samples)) ok=0;
     if (history && fclose(history)) ok=0;
     if (batches && fclose(batches)) ok=0;
@@ -263,15 +284,21 @@ done:
     return ok;
 }
 
+static int matches_preset(GptConfig c,GptConfig preset)
+{
+    return c.vocab_size==preset.vocab_size && c.context==preset.context &&
+           c.width==preset.width && c.heads==preset.heads && c.layers==preset.layers;
+}
+
 static int inference(int argc,char **argv,int generation)
 {
     int n,window;
-    if (argc!=6 || !integer(argv[4],1,generation?10000:64,&n) || !integer(argv[5],1,1024,&window)) return 0;
+    if (argc!=6 || !integer(argv[4],1,generation?10000:64,&n) ||
+        !integer(argv[5],1,GPT2_CONTEXT,&window)) return 0;
     int batch=generation ? 1 : n;
     Shard s={0}; Buffers buf={0}; Gpt host={0}; GPUModel *g=NULL;
     int ok=load(&s,argv[3]) && checkpoint_load(argv[2],&host,NULL) &&
-           host.config.vocab_size==small.vocab_size && host.config.context==small.context &&
-           host.config.width==small.width && host.config.heads==small.heads && host.config.layers==small.layers &&
+           (matches_preset(host.config,small) || matches_preset(host.config,medium)) &&
            (g=gpu_create(&host,batch,window)) && buffers(&buf,batch,window);
     if (ok && generation) {
         ok=sample(g,&s,window,n,stdout); putchar('\n');
@@ -287,11 +314,11 @@ static int inference(int argc,char **argv,int generation)
 static int unigram(const char *training,const char *test)
 {
     Shard tr={0}, te={0};
-    size_t *counts=calloc((size_t)small.vocab_size,sizeof(*counts));
+    size_t *counts=calloc(GPT2_VOCAB,sizeof(*counts));
     int ok=counts && load(&tr,training) && load(&te,test) && tr.count>1 && te.count>1;
     if (ok) {
         for (size_t i=1;i<tr.count;++i) ++counts[tr.ids[i]];
-        double denom=(double)(tr.count-1)+0.1*small.vocab_size;
+        double denom=(double)(tr.count-1)+0.1*GPT2_VOCAB;
         double nll=0;
         for (size_t i=1;i<te.count;++i)
             nll-=log(((double)counts[te.ids[i]]+0.1)/denom);
@@ -309,7 +336,7 @@ int main(int argc,char **argv)
     if (argc>1 && !strcmp(argv[1],"eval") && inference(argc,argv,0)) return 0;
     if (argc>1 && !strcmp(argv[1],"sample") && inference(argc,argv,1)) return 0;
     if (argc==4 && !strcmp(argv[1],"unigram") && unigram(argv[2],argv[3])) return 0;
-    fputs("nfgpu check\nnfgpu train TRAIN.u16 VAL.u16 NEW_RUN STEPS WINDOW BATCH EVAL_EVERY SEED PROMPT.u16\n"
+    fputs("nfgpu check\nnfgpu train TRAIN.u16 VAL.u16 NEW_RUN STEPS WINDOW BATCH EVAL_EVERY SEED PROMPT.u16 [small|medium]\n"
           "nfgpu eval MODEL.nfg TEST.u16 BATCH WINDOW\nnfgpu sample MODEL.nfg PROMPT.u16 TOKENS WINDOW\n"
           "nfgpu unigram TRAIN.u16 TEST.u16\n",stderr);
     return 1;

@@ -44,6 +44,24 @@ static int ieee_supported(void)
            FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128;
 }
 
+static void pack_parameter(unsigned char *dest, const float *value)
+{
+    uint32_t bits;
+    memcpy(&bits, value, sizeof(bits));
+    pack(dest, bits, 4);
+}
+
+uint64_t checkpoint_parameter_hash(const Gpt *g)
+{
+    uint64_t hash = offset_basis;
+    unsigned char bytes[4];
+    for (size_t i = 0; i < g->parameter_count; ++i) {
+        pack_parameter(bytes, g->parameters+i);
+        hash = hash_bytes(hash, bytes, 4);
+    }
+    return hash;
+}
+
 /* Five u32 config fields, one u64 parameter count and 256 training-byte flags. */
 enum { HEADER = 20 + 8 + 256, CHUNK = 8192 };
 
@@ -65,11 +83,9 @@ static int write_model(FILE *f, const Gpt *g, const unsigned char seen[256])
         size_t n = g->parameter_count - pos;
         if (n > CHUNK) n = CHUNK;
         for (size_t k = 0; k < n; ++k) {
-            uint32_t bits;
             if (!isfinite(g->parameters[pos+k]))
                 return 0;
-            memcpy(&bits, &g->parameters[pos+k], 4);
-            pack(buf + 4*k, bits, 4);
+            pack_parameter(buf + 4*k, g->parameters+pos+k);
         }
         if (fwrite(buf, 4, n, f) != n)
             return 0;

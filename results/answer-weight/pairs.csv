@@ -1,0 +1,57 @@
+split,assignment,1x_final,4x_final,1x_selected,4x_selected
+val,Fach A: Blei. Fach B: Glas.,2,1,1,1
+val,Fach A: Blei. Fach B: Holz.,2,1,1,1
+val,Fach A: Blei. Fach B: Kork.,0,1,1,0
+val,Fach A: Erde. Fach B: Sand.,1,1,1,1
+val,Fach A: Erde. Fach B: Ton.,1,1,1,1
+val,Fach A: Glas. Fach B: Blei.,1,1,1,1
+val,Fach A: Gold. Fach B: Harz.,1,1,0,1
+val,Fach A: Harz. Fach B: Gold.,1,1,0,1
+val,Fach A: Harz. Fach B: Kork.,1,1,0,1
+val,Fach A: Holz. Fach B: Blei.,1,1,1,1
+val,Fach A: Kork. Fach B: Blei.,1,1,1,1
+val,Fach A: Kork. Fach B: Harz.,2,1,0,1
+val,Fach A: Sand. Fach B: Erde.,1,1,1,1
+val,Fach A: Ton. Fach B: Erde.,1,1,0,1
+val,Links: beige. Rechts: lila.,1,2,1,2
+val,Links: blau. Rechts: rosa.,2,2,1,2
+val,Links: braun. Rechts: gelb.,1,1,0,1
+val,Links: braun. Rechts: weiß.,0,2,0,1
+val,Links: gelb. Rechts: braun.,1,2,1,2
+val,Links: gelb. Rechts: rosa.,1,2,1,2
+val,Links: grün. Rechts: lila.,1,1,0,1
+val,Links: lila. Rechts: beige.,0,2,1,2
+val,Links: lila. Rechts: grün.,1,2,1,2
+val,Links: rosa. Rechts: blau.,1,2,1,1
+val,Links: rosa. Rechts: gelb.,1,2,1,2
+val,Links: rosa. Rechts: rot.,1,1,1,1
+val,Links: rot. Rechts: rosa.,1,1,1,1
+val,Links: weiß. Rechts: braun.,1,2,1,2
+test,Fach A: Blei. Fach B: Eis.,2,1,1,1
+test,Fach A: Eis. Fach B: Blei.,1,1,1,1
+test,Fach A: Eis. Fach B: Erde.,1,1,1,1
+test,Fach A: Erde. Fach B: Eis.,1,1,1,1
+test,Fach A: Erde. Fach B: Gold.,1,1,0,1
+test,Fach A: Glas. Fach B: Harz.,2,1,1,1
+test,Fach A: Gold. Fach B: Erde.,2,1,0,1
+test,Fach A: Harz. Fach B: Glas.,1,1,1,1
+test,Fach A: Harz. Fach B: Holz.,1,1,1,1
+test,Fach A: Harz. Fach B: Ton.,1,1,1,1
+test,Fach A: Holz. Fach B: Harz.,1,1,1,1
+test,Fach A: Sand. Fach B: Ton.,1,0,1,0
+test,Fach A: Ton. Fach B: Harz.,1,1,1,1
+test,Fach A: Ton. Fach B: Sand.,2,1,0,0
+test,Links: beige. Rechts: braun.,1,1,1,1
+test,Links: beige. Rechts: grün.,1,1,1,1
+test,Links: blau. Rechts: braun.,1,2,1,2
+test,Links: braun. Rechts: beige.,1,0,1,1
+test,Links: braun. Rechts: blau.,1,2,1,2
+test,Links: braun. Rechts: rot.,0,1,0,1
+test,Links: grau. Rechts: lila.,1,1,1,1
+test,Links: grau. Rechts: rosa.,2,1,0,2
+test,Links: grün. Rechts: beige.,2,1,2,2
+test,Links: lila. Rechts: grau.,1,2,2,2
+test,Links: lila. Rechts: weiß.,1,2,1,2
+test,Links: rosa. Rechts: grau.,1,2,1,2
+test,Links: rot. Rechts: braun.,2,2,2,2
+test,Links: weiß. Rechts: lila.,1,1,1,1

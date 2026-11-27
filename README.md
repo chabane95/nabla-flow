@@ -33,6 +33,10 @@ The unigram baseline counts tokens in the training text. It gives the same odds 
 
 Why the jump from 63 on validation to 176 on the test? The split follows the order of the plays. In validation, 86 of 361 speeches have a speaker heading that never appears in training. In the test it's 290 of 362, including speeches by Prospero and Miranda. To find out how much the names themselves cost, I'd have to score the headings and the lines separately. [Corpus and split counts](results/gpt2-124m/data.json)
 
+## How much memory does GPT-2 Medium need?
+
+GPT-2 Medium trained from random weights for 64 updates on the same RTX 4070 SUPER. Each update used four windows of 128 tokens, or 512 next-token predictions. With 354,823,168 parameters, the trainer allocated **6.25 GiB** for weights, gradients, Adam moments and working buffers. The highest sampled memory usage across the whole graphics card was **7.92 GiB**, including the desktop and CUDA overhead. [Memory plot](results/gpt2-medium-355m/memory.png) · [Trainer buffers and driver readings](results/gpt2-medium-355m/memory.csv) · [Board samples](results/gpt2-medium-355m/board-memory.csv) · [Derivation and reproduction guide in German](docs/lernskript/07-gpt2-medium.md)
+
 ## Two things worth checking in the code
 
 **Can an attention head see the answer?** When the input starts with `Now,`, changing everything to the right of the comma should leave the predictions up to that point alone. The CPU test makes exactly that edit and compares the earlier logits bit for bit. For a short input to the byte model, you can also look at the weights of one head, one row at a time. [C implementation and causality test](src/gpt.c) · [Attention animation](figures/attention.gif) · [Vaswani et al., section 3.2](https://arxiv.org/abs/1706.03762)
@@ -40,6 +44,8 @@ Why the jump from 63 on validation to 176 on the test? The split follows the ord
 **Where does the token embedding get its gradient?** GPT-2 uses the same matrix to look up the input tokens and to score all 50,257 possible outputs. Both uses contribute to its gradient. On a small decoder, `nablaflow check` compares every parameter's gradient against a finite difference. On the GPU, cuBLAS handles the matrix products. The attention, normalization and AdamW kernels are in the repository. [GPU implementation](src/gpu.c) · [CUDA kernels](src/gpu_kernels.cu) · [Parameter count](docs/gpt2-small.md) · [Original GPT-2 report](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 
 ## Starting with the smaller models
+
+Can the decoder tell which compartment contains the resin? Work out the token loss and one attention head's gradient on paper, then test the trained weights on paired questions in the [German first-principles course](docs/lernskript/README.md).
 
 Both byte models run on a CPU and ship with trained weights. One learns from short German lab notes. The prompt `Fach A: Glas. Fach B: Harz. In B liegt ` puts glass in compartment A and resin in B, then asks what's in B. The model answers `Glas.` and gets the grammar right while picking the wrong compartment. That's why this experiment also scores whole answers. It gets 26 out of 56 right. [Build and try the byte models](docs/byte-models.md) · [The smaller Shakespeare run](results/shakespeare/README.md)
 
