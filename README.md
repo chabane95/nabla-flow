@@ -1,5 +1,15 @@
 # nabla-flow
 
+## Abstract
+
+- Ich habe zwei Byte-Modelle sowie GPT-2 Small und Medium mit zufälligen Startgewichten trainiert. Beim Lauf mit 355 Millionen Parametern auf meiner RTX 4070 SUPER lag die höchste gemessene Speicherbelegung 6,50 GiB über dem Startwert.
+- Beim kleinsten Modell sank der Testverlust mit vierfachem Antwortgewicht von 0,247 auf 0,223 Nats pro Zieltoken. Die Zahl der Testbelegungen mit zwei richtigen Antworten fiel von 7 auf 6 von 28.
+
+## Projektziel
+
+- Ich wollte den Weg von einer falschen Vorhersage bis zur Änderung eines einzelnen Gewichts auf Papier nachvollziehen und die Ableitung im Code überprüfen. [Lernskript](docs/lernskript/README.md)
+- Zwei Fragen ließen sich am eigenen Rechner testen. Lernt ein Modell die Zuordnung von Material und Fach? Wie viel Speicher brauchen Gewichte, Gradienten und Zwischenwerte bei einem vollständigen GPT-2-Trainingsschritt?
+
 ## GPT-2 Medium · RTX 4070 SUPER
 
 - [Trainingslauf](results/gpt2-medium-355m/run.json) · 354.823.168 Parameter, FP32, 64 Updates auf *Tiny Shakespeare*, je 4 Fenster à 128 Tokens
@@ -11,18 +21,26 @@
 | [Trainerpuffer einschließlich Gewichten](results/gpt2-medium-355m/memory.csv) | 6,25 |
 | Gesamte Karte vor dem Start | 1,42 |
 | [Höchste gemessene Kartenbelegung (244 Messpunkte)](results/gpt2-medium-355m/board-memory.csv) | **7,92** |
-| [Zuwachs gegenüber dem Startwert (GIF)](results/gpt2-medium-355m/memory.gif) | **6,50** |
+| Zuwachs gegenüber dem Startwert | **6,50** |
+
+[![Kartenbelegung in GiB über die Laufzeit und Vergleich mit den reservierten Trainerpuffern](results/gpt2-medium-355m/memory.png)](results/gpt2-medium-355m/memory.svg)
+
+![Animation der 244 Speichermessungen vom Ausgangswert bis zum Ende des Trainingslaufs](results/gpt2-medium-355m/memory.gif)
 
 ## GPT-2 Small · Tiny Shakespeare
 
 - [Trainingslauf](results/gpt2-124m/history.csv) · 124.439.808 Parameter, 2.400 Updates, 1.228.800 Zieltokens
-- [Trainingsverlauf (GIF)](results/gpt2-124m/training.gif) · 121 s bis zur letzten Validierung, gemessen nach der Initialisierung
+- 121 s bis zur letzten Validierung, gemessen nach der Initialisierung
 
 | Modell und Datensatz | Verlust (Nats/Token) | Perplexität |
 | --- | ---: | ---: |
 | [GPT-2 Small, Validierung](results/gpt2-124m/validation-reload.csv) | 4,145 | 63,10 |
 | [GPT-2 Small, Test](results/gpt2-124m/test.csv) | 5,171 | 176,05 |
 | [Unigramm, derselbe Test](results/gpt2-124m/unigram-test.csv) | 6,684 | 799,28 |
+
+[![Trainings- und Validierungsverlust über 2.400 Updates sowie die daraus berechnete Validierungsperplexität](results/gpt2-124m/training.png)](results/gpt2-124m/training.svg)
+
+![Animation der Lernkurven von GPT-2 Small mit den 25 aufgezeichneten Messzeitpunkten](results/gpt2-124m/training.gif)
 
 ## Byte-Modell · Gewichtung des Antwortworts
 
@@ -35,3 +53,32 @@
 | Test gesamt | 7/28 | 6/28 |
 | Test · Farben | 3/14 | 6/14 |
 | Test · Materialien | 4/14 | 0/14 |
+
+[![Doppeltreffer bei einfachem und vierfachem Antwortgewicht in Validierung und Test, aufgeteilt nach Farben und Materialien](results/answer-weight/paired-recall.png)](results/answer-weight/paired-recall.svg)
+
+## Byte-Modelle · Lernkurven und trainierte Gewichte
+
+| Trainingsdaten | Parameter | Update mit kleinstem Validierungsverlust | Testperplexität |
+| --- | ---: | ---: | ---: |
+| [Laborprotokolle, Antwortgewicht 1×](results/test.csv) | 35.776 | 1.000 | 1,270 |
+| [Shakespeare, auf Byte-Ebene](results/shakespeare/test.csv) | 43.056 | 1.700 | 6,981 |
+
+[![Trainings- und Validierungsverlust über 1.800 Updates für die beiden Byte-Modelle](figures/learning-curves.png)](figures/learning-curves.svg)
+
+- Labormodell bei Update 1.000 · acht Zeilen der Byte-Embeddings und die Query-Matrix des ersten Kopfs in Block 1
+
+[![Gelernte Gewichte der Byte-Embeddings und der Query-Projektion auf gemeinsamer Farbskala](figures/byte-weights.png)](figures/byte-weights.svg)
+
+- Derselbe Checkpoint, erster Kopf in Block 2 · bei `Links: rot.` erhält das `o` an der Position des `t` ein Attention-Gewicht von 0,711. [Messwerte](results/attention.csv)
+
+[![Attention-Matrix für „Links: rot.“ mit schraffierten zukünftigen Positionen](figures/attention.png)](figures/attention.svg)
+
+![Animation derselben Attention-Matrix, in der pro Eingabebyte eine weitere gemessene Zeile sichtbar wird](figures/attention.gif)
+
+## Quellen
+
+- **Selbstaufmerksamkeit und kausale Maske** · Vaswani et al. (2017), Abschnitt 3.2. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+- **GPT-2-Architektur** · Radford et al. (2019), Abschnitt 2.3 und Tabelle 2. [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- **AdamW** · Loshchilov und Hutter (2019). [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101)
+- **Shakespeare-Trainingsdaten** · *Tiny Shakespeare*, Textfassung aus Andrej Karpathys `char-rnn`. [Verwendeter Datenstand](https://github.com/karpathy/char-rnn/blob/370cbcd448eb7daf32f21a6be560b70e0b33c4e3/data/tinyshakespeare/input.txt)
+- **Material- und Farbaufgaben** · im Projekt erzeugte Laborprotokolle. [Datengenerator](tools/corpus.c) · [Testbelegungen und Antworten](results/answer-weight/pairs.csv)
