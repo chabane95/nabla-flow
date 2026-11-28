@@ -18,7 +18,10 @@
 
 ### Das Gewicht für `G` vor und nach dem ersten Update
 
-- Der erste Eintrag für `G` (Byte 71, Spalte 0) startet bei **−0,012943409**. Im Kontrolllauf mit Seed 42 beträgt sein Gradient über die 361 Zieltoken des ersten Batches **−0,01677749**. Das negative Vorzeichen bedeutet, dass ein etwas größeres Gewicht den Verlust auf diesem Batch senkt.
+- Der erste Eintrag für `G` (Byte 71, Spalte 0) startet im Kontrolllauf mit Seed 42 bei **−0,012943409**.
+- Im ersten Text des Batches soll nach `Fach A: Sand. Fach B: ` das `G` von `Glas` folgen. Das Modell gibt ihm die Wahrscheinlichkeit $p_G=0{,}00377877$. Die erste Koordinate des letzten Zustandsvektors ist hier $h_0=1{,}01558244$. [Trainingszeile](data/train.txt#L15)
+- Für das Ziel `G` ist der Verlust $-\ln p_G=-z_G+\ln\sum_j e^{z_j}$. Ableiten nach dem Ausgabescore $z_G$ ergibt $-1+p_G$. Das Gewicht $w$ geht als $w\,h_0$ in diesen Score ein. Nach der Kettenregel trägt das Token also $(0{,}00377877-1)\cdot1{,}01558244\approx-1{,}011745$ zum Gradienten bei. Im bisherigen Text stand noch kein `G`, daher ist sein Beitrag über die Eingabetabelle hier null.
+- Die übrigen 360 Zieltoken tragen zusammen rund **−5,04493** bei. Der Trainer summiert alle Beiträge in FP32. Der mittlere Gradient vor dem Clipping ist damit $-6{,}05667496/361 \approx \mathbf{-0{,}01677749}$. Die einzeln berechneten Beiträge ergeben bei dieser Rundung denselben Mittelwert. [Alle 361 Einzelbeiträge](results/answer-weight/1x/first-batch-token-gradients.csv) · [Summe des Trainers](results/answer-weight/1x/first-update.csv)
 - Die Norm des gesamten Batchgradienten beträgt 2,05177. Der Trainer begrenzt sie auf 1 und multipliziert deshalb jede Komponente mit $1/2{,}05177$. Für dieses Gewicht bleibt $g=-0{,}00817707$.
 - Beim ersten AdamW-Schritt mit Lernrate $10^{-4}$ und Gewichtszerfall $0{,}01$ gilt $w_1=w_0-10^{-4}\left(\frac{g}{|g|+10^{-8}}+0{,}01\,w_0\right)$. Der Bruch ist hier fast −1. Das Gewicht steigt deshalb um **0,000100013** auf **−0,012843397**, genau wie im FP32-Checkpoint gemessen. [Messwerte](results/answer-weight/1x/first-update.csv) · [Optimiererschritt in C](src/gpt.c#L529-L573)
 
