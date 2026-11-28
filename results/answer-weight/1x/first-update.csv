@@ -1,0 +1,2 @@
+byte_id,coordinate,step,target_count,learning_rate,weight_decay,epsilon,global_mean_gradient_norm,clipping_factor,gradient_sum,mean_gradient,clipped_gradient,weight_before,weight_after
+71,0,1,361,0.0001,0.01,1e-08,2.0517723747819572,0.48738349940317843,-6.0566749572753906,-0.016777492956441525,-0.008177073228322649,-0.012943409383296967,-0.01284339651465416

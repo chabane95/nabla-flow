@@ -14,7 +14,13 @@
 
 - Ein Parameter ist eine im Modell gespeicherte Zahl, die sich beim Training ändern kann. Das einfachste Beispiel ist eine Gerade durch den Ursprung, $y=w x$. Hier hat das Modell genau einen Parameter, die Steigung $w$.
 - Angenommen, für die Eingabe $x=2$ soll das Ergebnis $1$ sein. Mit $w=0{,}3$ sagt das Modell $0{,}6$ voraus. Ändert das Training $w$ auf $0{,}4$, ergibt dieselbe Eingabe $0{,}8$. Mit $w=0{,}5$ trifft das Modell diesen Datenpunkt genau.
-- Im trainierten Byte-Modell hat jedes Eingabebyte eine Zeile mit 32 gelernten Zahlen. Die erste Zahl für `G` ist −0,0648, die für `H` ist +0,1039. Jede davon zählt als **ein** Parameter. Insgesamt hat dieses Modell **35.776**. [Gewichte aus dem Checkpoint](figures/byte-weights.svg)
+- Im Byte-Modell hat jedes Eingabebyte eine Zeile mit 32 gelernten Zahlen. Im Checkpoint nach 1.000 Updates ist die erste Zahl für `G` −0,0648, die für `H` +0,1039. Jede davon zählt als **ein** Parameter. Insgesamt hat dieses Modell **35.776**. [Gewichte aus dem Checkpoint](figures/byte-weights.svg)
+
+### Das Gewicht für `G` vor und nach dem ersten Update
+
+- Der erste Eintrag für `G` (Byte 71, Spalte 0) startet bei **−0,012943409**. Im Kontrolllauf mit Seed 42 beträgt sein Gradient über die 361 Zieltoken des ersten Batches **−0,01677749**. Das negative Vorzeichen bedeutet, dass ein etwas größeres Gewicht den Verlust auf diesem Batch senkt.
+- Die Norm des gesamten Batchgradienten beträgt 2,05177. Der Trainer begrenzt sie auf 1 und multipliziert deshalb jede Komponente mit $1/2{,}05177$. Für dieses Gewicht bleibt $g=-0{,}00817707$.
+- Beim ersten AdamW-Schritt mit Lernrate $10^{-4}$ und Gewichtszerfall $0{,}01$ gilt $w_1=w_0-10^{-4}\left(\frac{g}{|g|+10^{-8}}+0{,}01\,w_0\right)$. Der Bruch ist hier fast −1. Das Gewicht steigt deshalb um **0,000100013** auf **−0,012843397**, genau wie im FP32-Checkpoint gemessen. [Messwerte](results/answer-weight/1x/first-update.csv) · [Optimiererschritt in C](src/gpt.c#L529-L573)
 
 ## Lernskript
 
