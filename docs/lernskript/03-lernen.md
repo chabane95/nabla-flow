@@ -1,24 +1,22 @@
 # 3 · Wie ein Vorhersagefehler ein Gewicht verändert
 
-Im [Vorwärtspass](02-transformer.md) liefert eine Attention-Zeile den Vektor $(1/2,3)$. Verwende zur Probe seine erste Komponente als Verlust. Du darfst einen der beiden Attention-Scores ein wenig verkleinern. Welchen wählst du, damit der Verlust sinkt? Am Ende des Rückwegs können wir ausrechnen, um wie viel er sich dabei ändert.
-
-Du brauchst die Produkt- und Kettenregel und das Skalarprodukt. Halte beim Lesen einen Unterschied fest. Die Ableitung sagt, wie ein vorgegebener Verlust auf eine kleine Störung reagiert. Die Regel, nach der wir anschließend tatsächlich die Gewichte ändern, ist eine eigene Modellierungsentscheidung.
+Im [Vorwärtspass](02-transformer.md) ergab eine Zeile der Attention den Vektor $(1/2,3)$. Als Probe nehmen wir die erste Komponente und verändern einen der beiden Scores um einen kleinen Betrag $h$. Die Ableitung liefert eine Vorhersage für diese Änderung. Eine zweite Auswertung der Vorwärtsrechnung prüft sie.
 
 ## Eine Störung als Gedankenexperiment
 
-Halte Eingabetext und Ziel-IDs fest. Verändere genau ein Gewicht $\theta_i$ um ein kleines $h$. Die Vorhersage für die Änderung des mittleren Tokenverlusts $L$ lautet
+Bei festem Eingabetext und festen Ziel-IDs hängt der mittlere Tokenverlust $L$ nur von den Gewichten ab. Ändert sich allein das Gewicht $\theta_i$ um $h$, gilt in erster Ordnung
 
 $$
 L(\theta+h e_i)-L(\theta)=h\,\frac{\partial L}{\partial\theta_i}+O(h^2).
 $$
 
-Hier ist $e_i$ der Einheitsvektor in der gewählten Parameterrichtung. Wie berechnet man alle diese Steigungen mit einem einzigen Rückweg? Sei $u$ ein Zwischenvektor und $\bar u$ der Vektor der partiellen Ableitungen des betrachteten skalaren Verlusts nach $u$. Eine beliebige kleine Änderung $\mathrm du$ trägt dann $\bar u^\top\mathrm du$ zum Differential des Verlusts bei. Für $v=f(u)$ gilt $\mathrm dv=J_f\,\mathrm du$. Einsetzen liefert $\bar v^\top J_f\,\mathrm du$, also $\bar u=J_f^\top\bar v$. Man braucht nur dieses Produkt mit der transponierten Jacobi-Matrix. Wird $u$ an zwei Stellen gelesen, erzeugt dasselbe $\mathrm du$ zwei Beiträge. Ihre Summe ist der Gradient an $u$.
+Dabei bezeichnet $e_i$ den Einheitsvektor in Richtung des Gewichts. Für einen Zwischenvektor $u$ schreiben wir $\bar u$ für den Gradienten des Verlusts nach $u$. Sein Beitrag zum Differential des Verlusts ist $\bar u^\top\mathrm du$. Für $v=f(u)$ gilt $\mathrm dv=J_f\,\mathrm du$. Einsetzen in $\bar v^\top\mathrm dv$ ergibt $\bar u=J_f^\top\bar v$. Das ist der Rückwärtsschritt der Kettenregel. Geht $u$ in zwei Rechnungen ein, tritt dieselbe Variation $\mathrm du$ in beiden auf. Ihre Koeffizienten addieren sich.
 
-Im Folgenden beziehen sich die Balken auf die **Summe** $S=\sum_t\ell_t$ der Verluste aller betrachteten Zielpositionen. Für den Mittelwert $L=S/N$ teilen wir am Schluss durch die Anzahl $N$ der Ziele. Vektoren einer einzelnen Position sind Spalten, eine Gewichtsmatrix hat die Form $(\text{Ausgänge},\text{Eingänge})$. So speichert sie auch die C-Funktion `dense`. [Herleitung am einzelnen Neuron](../../latex/backprop_first_principles.tex) · [Konvention für die Gradientensumme](../../src/gpt.h)
+Die Balken beziehen sich im Folgenden auf die Summe $S=\sum_t\ell_t$ über die Zielpositionen. Für den Mittelwert $L=S/N$ teilt der Trainer am Ende durch die Anzahl $N$ der Ziele. Vektoren sind Spalten. Eine Gewichtsmatrix hat wie in der C-Funktion `dense` eine Zeile je Ausgang und eine Spalte je Eingang. [Herleitung am einzelnen Neuron](../../latex/backprop_first_principles.tex) · [Konvention für die Gradientensumme](../../src/gpt.h)
 
 ## Vom beobachteten Token zur letzten Modellschicht
 
-An Position $t$ ist $y_t$ die ID des tatsächlich folgenden Tokens, $z_t$ der Vektor der Logits und $p_{tj}=\exp z_{tj}/\sum_k\exp z_{tk}$. Schreiben wir $\ell_t=-\ln p_{t y_t}$ als Differenz, liefert der erste Term beim Ableiten die Wahrscheinlichkeit jeder Klasse und der zweite markiert die beobachtete Klasse.
+An Position $t$ hat das tatsächlich folgende Token die ID $y_t$. Aus dem Logit $z_{tj}$ ergibt sich die Wahrscheinlichkeit $p_{tj}=\exp z_{tj}/\sum_k\exp z_{tk}$ für Klasse $j$. Beim Ableiten von $\ell_t=-\ln p_{t y_t}$ liefert der Nenner einen Beitrag für jede Klasse, der Zähler nur für die beobachtete.
 
 $$
 \ell_t=\ln\sum_k e^{z_{tk}}-z_{t y_t},
@@ -28,7 +26,7 @@ $$
 \bar z_{tj}=p_{tj}-\mathbf 1_{j=y_t}.
 $$
 
-Wenn das Modell dem Ziel die Wahrscheinlichkeit $1/4$ gibt, ist dessen Logit-Ableitung $-3/4$. Eine kleine Erhöhung dieses Logits senkt den Verlust. Die Ableitungen aller Logits einer Position summieren sich zu null. Das folgt auch ohne Rechnung aus der Invarianz des Softmax unter einer gemeinsamen Verschiebung aller Logits. Im Code wird das größte Logit vor dem Exponenzieren abgezogen. Für den Verlust wird die Log-Summe direkt ausgewertet. Dadurch bleibt selbst bei numerisch auf null gerundeter Zielwahrscheinlichkeit ein endlicher Verlust berechenbar. [`token_objective`](../../src/gpt.c#L410)
+Erhält das Ziel die Wahrscheinlichkeit $1/4$, beträgt die Ableitung nach seinem Logit $-3/4$. Erhöht man ihn um $h$, sinkt der Verlust in erster Ordnung um $3h/4$. Die Summe der Ableitungen verschwindet, weil eine gemeinsame Verschiebung aller Logits die Wahrscheinlichkeiten unverändert lässt. Der Code nutzt diese Symmetrie und zieht vor dem Exponenzieren das Zeilenmaximum ab. Der logarithmische Ausdruck für $\ell_t$ bleibt selbst dann auswertbar, wenn die Zielwahrscheinlichkeit in der Gleitkommarechnung auf null rundet. [`token_objective`](../../src/gpt.c#L410)
 
 Für die Ausgabe gilt $z_t=E h_t$, mit dem abschließend normalisierten Zustand $h_t\in\mathbb R^d$ und der Tokenmatrix $E\in\mathbb R^{V\times d}$. Ändern sich beide, ergibt die Produktregel zwei Beiträge.
 
@@ -40,13 +38,11 @@ $$
 \bar h_t=E^\top\bar z_t .
 $$
 
-Man liest die beiden letzten Ausdrücke ab, indem man $\bar z_t^\top\mathrm dz_t$ ausmultipliziert und die Koeffizienten von $\mathrm dE_{ji}$ und $\mathrm dh_{ti}$ sammelt. Dieselbe Rechnung gilt für jede affine Schicht $v=Wu+b$. Zu $\bar W$ kommt $\bar v u^\top$, zu $\bar b$ kommt $\bar v$, am Eingang kommt $W^\top\bar v$ an. Weil eine Schicht an vielen Positionen dieselben Gewichte verwendet, werden deren Beiträge summiert. [`dense_backward`](../../src/gpt.c#L336)
+Die beiden Gradienten sind die Koeffizienten von $\mathrm dE_{ji}$ und $\mathrm dh_{ti}$ im Produkt $\bar z_t^\top\mathrm dz_t$. Für jede affine Schicht $v=Wu+b$ folgt entsprechend der Beitrag $\bar v u^\top$ zur Matrixableitung, $\bar v$ zur Biasableitung und $W^\top\bar v$ am Eingang. Die Beiträge verschiedener Positionen summieren sich, weil dort dieselbe Matrix wirkt. [`dense_backward`](../../src/gpt.c#L336)
 
 ## Durch eine LayerNorm zurück
 
-Die letzte Operation vor der Ausgabe und beide Zweige in jedem Block enthalten eine LayerNorm. Schon das Ändern einer einzigen Vektorkomponente verschiebt ihren Mittelwert. Wie viel von der Änderung erreicht die nächste Schicht?
-
-Betrachte eine Position. Schreibe $\langle a\rangle=d^{-1}\sum_i a_i$ für den Mittelwert über deren $d$ Komponenten. Die Vorwärtsrechnung ist
+Bei der LayerNorm beeinflusst jede Komponente auch die anderen. Eine Änderung von $x_i$ verschiebt den Mittelwert, der von allen Komponenten abgezogen wird. Mit $\langle a\rangle=d^{-1}\sum_i a_i$ lautet die Vorwärtsrechnung
 
 $$
 \mu=\langle x\rangle,\quad c_i=x_i-\mu,\quad
@@ -61,7 +57,7 @@ $$
 \mathrm du_i=r\big(\mathrm dx_i-\langle\mathrm dx\rangle-u_i\langle u\,\mathrm dx\rangle\big).
 $$
 
-Mit $g_i=\gamma_i\bar y_i$ ist der eingangsabhängige Verlustbeitrag $\sum_i g_i\,\mathrm du_i$. Sortieren nach $\mathrm dx_i$ ergibt den Beitrag der LayerNorm zum Eingangsgradienten. Die beiden Parameterableitungen folgen direkt aus der affinen Abbildung $y_i=\gamma_i u_i+\beta_i$.
+Mit $g_i=\gamma_i\bar y_i$ ist der Beitrag der normierten Komponenten zum Differential des Verlusts $\sum_i g_i\,\mathrm du_i$. Der Koeffizient von $\mathrm dx_i$ liefert den Eingangsgradienten. Die Ableitungen nach $\gamma_i$ und $\beta_i$ folgen aus $y_i=\gamma_i u_i+\beta_i$.
 
 $$
 \bar x_i^{\,\rm LN}=r\big(g_i-\langle g\rangle-u_i\langle gu\rangle\big),
@@ -74,9 +70,9 @@ $$
 
 ## Durch Residuum und MLP
 
-Für den zweiten Halbblock gilt $b=a+F(a)$, wobei $a$ das Ergebnis des ersten Halbblocks ist. Da $\mathrm db=\mathrm da+J_F\,\mathrm da$, erreicht $\bar a=\bar b+J_F^\top\bar b$ den Knoten $a$. Der erste Summand läuft direkt durch die Addition. Beim zweiten geht es nacheinander durch die Ausgabematrix des MLP, seine Aktivierung, die Eingangsmatrix und die LayerNorm. Im MLP wird die Dimension von $d$ auf $4d$ erweitert und dann wieder auf $d$ verkleinert.
+Der zweite Halbblock bildet $b=a+F(a)$ aus dem Ergebnis $a$ des ersten. Aus $\mathrm db=\mathrm da+J_F\,\mathrm da$ folgt $\bar a=\bar b+J_F^\top\bar b$. Der erste Summand stammt aus der direkten Verbindung. Der zweite durchläuft die Ausgabematrix des MLP, die Aktivierung, die Eingangsmatrix und die LayerNorm in umgekehrter Reihenfolge zur Vorwärtsrechnung.
 
-Für die Aktivierung benutzt das Projekt die tanh-Näherung der GELU. Setze $a_0=\sqrt{2/\pi}$, $b_0=0{,}044715$ und $u=\tanh(a_0(x+b_0 x^3))$. Aus $\phi(x)=x(1+u)/2$ folgen mit der Produktregel
+Zwischen den beiden Matrizen wirkt die tanh-Näherung der GELU auf die $4d$ Komponenten. Mit $a_0=\sqrt{2/\pi}$, $b_0=0{,}044715$ und $u=\tanh(a_0(x+b_0 x^3))$ folgt aus $\phi(x)=x(1+u)/2$ die Ableitung
 
 $$
 \phi'(x)=\tfrac12(1+u)+\tfrac12 x(1-u^2)\,a_0(1+3b_0x^2),
@@ -88,7 +84,7 @@ Die Formel gilt komponentenweise. Bei $x=0$ geht also die Hälfte des ankommende
 
 ## Durch eine kausale Attention-Zeile
 
-Für einen Kopf der Breite $d_h$ liest Position $t$ die Positionen $j\leq t$. Ihre Scores sind $s_{tj}=q_t^\top k_j/\sqrt{d_h}$, die Gewichte $a_{tj}$ deren Softmax und der Kopfvektor ist $o_t=\sum_{j\le t}a_{tj}v_j$. Fixiere $t$. Die Produktregel erfasst Änderungen der gelesenen Werte und ihrer Gewichtung.
+In einem Kopf der Breite $d_h$ hat Position $t$ Zugriff auf die Positionen $j\leq t$. Ihre Scores sind $s_{tj}=q_t^\top k_j/\sqrt{d_h}$, die Gewichte $a_{tj}$ deren Softmax. Im Kopfvektor $o_t=\sum_{j\le t}a_{tj}v_j$ können sich sowohl die gelesenen Werte als auch ihre Gewichte ändern.
 
 $$
 \mathrm do_t=\sum_{j\le t} a_{tj}\,\mathrm dv_j+\sum_{j\le t}v_j\,\mathrm da_{tj}.
@@ -100,7 +96,7 @@ $$
 \bar s_{tj}=a_{tj}\,\bar o_t^\top(v_j-o_t).
 $$
 
-Nun nochmals die Produktregel, diesmal für $q_t^\top k_j$. Über alle erlaubten Kanten ergeben sich
+Die Produktregel für $q_t^\top k_j$ liefert die Gradienten nach Query und Key. Die Summen laufen jeweils über die von der Maske zugelassenen Positionen.
 
 $$
 \bar q_t=\sum_{j\le t}\frac{\bar s_{tj}k_j}{\sqrt{d_h}},
@@ -112,14 +108,14 @@ $$
 
 Ein früher Wert kann also Fehlerbeiträge von mehreren späteren Vorhersagen erhalten. Für $j>t$ ist der Beitrag der Zeile $t$ genau null. In der CPU-Schleife enthält `ds` bereits den Faktor $1/\sqrt{d_h}$. Die drei Gradienten gehen danach durch die gemeinsame affine QKV-Projektion zurück. [`attention_backward`](../../src/gpt.c#L377)
 
-**Handrechnung am Beispiel aus Kapitel 2.** Es gilt $a_{10}=1/4$, $a_{11}=3/4$, $v_0=(2,0)$, $v_1=(0,4)$ und $o_1=(1/2,3)$. Wähle die erste Komponente von $o_1$ als skalaren Verlust für diese Probe. Dann ist $\bar o_1=(1,0)$. Erhält der erste Wert mehr Gewicht, wächst die erste Komponente. Einsetzen liefert die Steigungen bezüglich beider Scores.
+**Zahlenprobe.** In Kapitel 2 waren $a_{10}=1/4$, $a_{11}=3/4$, $v_0=(2,0)$, $v_1=(0,4)$ und $o_1=(1/2,3)$. Für die zu Beginn gewählte erste Komponente gilt $\bar o_1=(1,0)$. Ihre beiden Steigungen sind
 
 $$
 \bar s_{10}=\tfrac14(2-\tfrac12)=\tfrac38,\qquad
 \bar s_{11}=\tfrac34(0-\tfrac12)=-\tfrac38.
 $$
 
-Eine kleine Senkung des **ersten** Scores senkt diesen Verlust. Eine gemeinsame Verschiebung beider Scores hat wegen der entgegengesetzten Ableitungen keinen Effekt. Noch direkter lässt sich das erste Vorzeichen prüfen. Erhöhe $s_{10}=0$ um $h$ und halte $s_{11}=\ln 3$ fest. Die erste Komponente ist dann $2e^h/(e^h+3)$. Ihre Steigung bei null ist $3/8$.
+Erhöht sich nur $s_{10}=0$ um $h$, wächst die erste Komponente um $3h/8+O(h^2)$. Zur direkten Kontrolle bleibt $s_{11}=\ln 3$ fest. Die Vorwärtsrechnung ergibt dann $2e^h/(e^h+3)$, mit der Steigung $3/8$ bei $h=0$. Eine gemeinsame Verschiebung beider Scores muss die Mischung erhalten. Dazu passt $3/8-3/8=0$.
 
 ## Ein Gewicht mit zwei Wirkungen
 
@@ -130,13 +126,13 @@ $$
             +\underbrace{\sum_{t:\,i_t=j}\bar x_{tk}}_{\text{Eingabe}}.
 $$
 
-Der Positionsvektor $P_{t,:}$ erhält den Eingangsgradienten seiner Position, bei mehreren Fenstern summiert über deren Beiträge. Man kann den Lebensweg eines Eintrags im Speicher verfolgen. `token_objective` schreibt zuerst den Ausgabebeitrag, am Ende von `gpt_backward` addiert `dtoken[i] += ...` den Eingabebeitrag an dieselbe Adresse. [Ausgabeprojektion](../../src/gpt.c#L410) · [Eingangs- und Positionsgradient](../../src/gpt.c#L503)
+Der Positionsvektor $P_{t,:}$ erhält den Eingangsgradienten seiner Position, bei mehreren Fenstern summiert über deren Beiträge. Für das Tokengewicht schreibt `token_objective` zuerst den Ausgabebeitrag. Am Ende von `gpt_backward_weighted` addiert `dtoken[i] += ...` den Eingabebeitrag an dieselbe Adresse. [Ausgabeprojektion](../../src/gpt.c#L410) · [Eingangs- und Positionsgradient](../../src/gpt.c#L503)
 
-**Kontrollmodell mit nur einem freien Gewicht.** Streiche für dieses Handexperiment die Blöcke und die Normierung. Zwei Token haben die skalaren Einträge $(w,0)$. Das erste ist Eingabe, das zweite Ziel. Der Zustand ist $w$, die Logits sind $(w^2,0)$ und der Verlust ist $\ln(1+e^{w^2})$. Bei $w=1$ ist $p_0=e/(e+1)$. Die Ausgabe liefert $p_0 w$, der Rückweg zum gelesenen Eingabevektor nochmals $p_0 w$. Zusammen ergeben sie $2p_0\approx1{,}46212$. Wer einen Pfad vergisst, erhält bei dieser Probe genau die halbe Steigung.
+**Kontrollmodell mit einem Gewicht.** Zwei Token haben die skalaren Einträge $(w,0)$. Das erste ist Eingabe, das zweite Ziel. Ohne Blöcke und Normierung bleibt der Zustand $w$, die beiden Logits sind $(w^2,0)$. Der Verlust beträgt $\ln(1+e^{w^2})$. Bei $w=1$ ist $p_0=e/(e+1)$. Die Ausgabe liefert zur Ableitung den Beitrag $p_0 w$, die Eingabe einen weiteren Beitrag $p_0 w$. Die Gesamtsteigung ist also $2p_0\approx1{,}46212$.
 
 ## Einen Gradienten messen
 
-Für ein Gewicht $\theta_i$ werte mit identischen Daten den mittleren Verlust bei $\theta_i+h$ und $\theta_i-h$ aus. Taylorentwicklung an beiden Stellen und Subtraktion liefern
+Eine unabhängige Messung benutzt nur die Vorwärtsrechnung mit identischen Daten bei $\theta_i+h$ und $\theta_i-h$. Die beiden Taylorentwicklungen um $\theta_i$ liefern
 
 $$
 \frac{L(\theta+h e_i)-L(\theta-h e_i)}{2h}
@@ -145,7 +141,7 @@ $$
 
 Der gerade Term fällt beim Subtrahieren weg. Bei zu kleinem $h$ werden die beiden Verlustwerte im Rechner fast ununterscheidbar. Im Kontrollmodell liefert $h=0{,}001$ in doppelter Genauigkeit $1{,}46211743$ für die Steigung bei $w=1$, gegenüber $1{,}46211716$ aus der Ableitung.
 
-**Experiment im Repository.** Führe aus dem Projektverzeichnis unter PowerShell `.\nablaflow.exe check` aus, unter Linux oder macOS `./nablaflow check`. Die Bauanleitung steht bei den Byte-Modellen. `test_gradients` verwendet fünf Zielpositionen und variiert jeden der 1 128 Parameter eines kleinen Decoders um nominell $10^{-3}$. Die Eingabe enthält dieselbe ID zweimal. Eine falsche Zuweisung anstelle einer Addition in der Embedding-Ableitung wird dadurch messbar. Im Nenner verwendet der Test den tatsächlichen Abstand der beiden gespeicherten FP32-Gewichte. Verglichen wird mit `s->grad[i]/5`, weil `gpt_loss` einen Mittelwert liefert. Die größte absolute Abweichung im dokumentierten Referenzlauf war $6{,}78\cdot10^{-5}$. [Bauanleitung und Referenzwert](../byte-models.md) · [`test_gradients`](../../src/gpt.c#L604)
+`.\nablaflow.exe check` unter PowerShell bzw. `./nablaflow check` unter Linux und macOS wiederholt diese Probe für alle 1 128 Parameter eines kleinen Decoders. Die Eingabe enthält eine ID zweimal, sodass beide Beiträge zum Eingabegewicht eingehen müssen. Der nominelle Schritt beträgt $h=10^{-3}$. Als Nenner verwendet `test_gradients` den tatsächlichen Abstand der gespeicherten FP32-Werte. Bei fünf Zielpositionen ist `s->grad[i]/5` der Vergleichswert für den mittleren Verlust. Die größte absolute Abweichung im Referenzlauf betrug $6{,}78\cdot10^{-5}$. [Bauanleitung und Referenzwert](../byte-models.md) · [`test_gradients`](../../src/gpt.c#L604)
 
 ## Vom Gradienten zum Optimierungsschritt
 
@@ -170,13 +166,13 @@ Für eine kleine Änderung $\Delta\theta$ ist $\Delta L\approx g^\top\Delta\thet
 
    Der Faktor $1-\eta_n\lambda$ verkleinert Matrixgewichte separat von den Momenten. Dazu zählen auch Token- und Positionsmatrizen. Für Biasvektoren sowie $\gamma,\beta$ der Normierung setzt der Code $\lambda=0$. Der Trainer für die Byte-Modelle verwendet für die Matrizen $\lambda=0{,}01$. Die GPT-2-Small-Trainer auf CPU und GPU verwenden $\lambda=0{,}1$. Alle drei begrenzen die Gradientennorm auf eins. [Update](../../src/gpt.c#L529) · [Byte-Training](../../src/main.c#L165) · [GPT-2 auf der CPU](../../src/scale.c#L84) · [GPT-2 auf der GPU](../../tools/nfgpu.c#L192)
 
-## Welche Rechnung überprüft die GPU?
+## Vergleich zwischen CPU und GPU
 
 Auf der CPU summiert `gpt_backward` die Beiträge eines Fensters, der Trainer ruft die Funktion für weitere Fenster wiederholt auf. Die GPU verarbeitet mehrere Fenster eines Batches gemeinsam. Der CUDA-Kernel `cross_entropy` überschreibt im Rückwärtsmodus die gespeicherten Logits mit $p-\mathrm{onehot}(y)$. cuBLAS berechnet die affinen Matrixprodukte. `embedding_back` addiert Beiträge parallel mit `atomicAdd`, etwa wenn mehrere Positionen dieselbe ID enthalten. Ab Breite 64 erlaubt der Host für Matrixprodukte TF32 bei FP32-Speicherung. Rundung und Reihenfolge der Additionen beeinflussen daher den numerischen Vergleich. [GPU-Rückweg](../../src/gpu.c#L402) · [CUDA-Kernel](../../src/gpu_kernels.cu#L40)
 
 `nfgpu check` vergleicht CPU und GPU bei Breiten 12 und 64. Neben den Logits prüft er den akkumulierten Gradienten, die Norm vor dem Begrenzen und die Wirkung zweier AdamW-Schritte. Die CPU-Differenzenprobe stellt eine andere Frage. Sie misst, wie sich die **Vorwärtsrechnung** beim Verändern eines Gewichts verhält. Zwei übereinstimmende Rückwärtsimplementierungen könnten denselben Ableitungsfehler enthalten. [Paritätstest](../../src/gpu.c#L479) · [Berichtete Messwerte](../training-124m.md#numerical-checks)
 
-## Aufgaben zur Selbstkontrolle
+## Drei Rechenproben
 
 **1. Gleiche Werte, unterschiedliche Scores.** Eine Attention-Zeile sieht zwei identische Vektoren $v_0=v_1=v$. Kann ein Fehlergradient aus ihrem Kopfvektor die beiden Scores auseinanderziehen? Was erhält jeder Wert?
 
@@ -205,4 +201,4 @@ $m_1=-0{,}05$ und $v_1=0{,}00025$. Nach Anfangskorrektur sind $\hat m_1=-0{,}5$ 
 
 </details>
 
-Wie gut diese Schritte die nächste Vorhersage und die Antwort auf eine ganze Frage verbessern, lässt sich an den gespeicherten Gewichten messen. [Weiter zum Labor](04-labor.md) · [Übersicht](README.md)
+[Weiter zum Labor](04-labor.md) · [Übersicht](README.md)

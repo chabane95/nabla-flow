@@ -1,12 +1,12 @@
 # 4 · Das Modell als Experiment
 
-Im Fach A liegt Glas, im Fach B Harz. Wenn man im letzten Satz nur den Buchstaben `A` durch `B` ersetzt, muss sich die richtige Antwort ändern. Ist genau das der Effekt, den ein niedriger Trainingsverlust misst? Du kannst diese Frage mit dem mitgelieferten Modell beantworten. Vorher prüfen wir, ob der Decoder überhaupt unter den Bedingungen rechnet, die seine Herleitung voraussetzt.
+In Fach A liegt Glas, in Fach B liegt Harz. Aus „In A liegt …“ wird „In B liegt …“. Ein Buchstabe in der Frage entscheidet darüber, welches ganze Wort die richtige Antwort ist. An dieser Belegung können wir die Wahrscheinlichkeit jedes nächsten Bytes messen und zählen, wie viele der beiden Antworten vollständig stimmen.
 
-Die folgenden PowerShell-Blöcke laufen der Reihe nach vom Stammverzeichnis des Repositorys aus. Für den Windows-Build unten brauchst du GCC mit C11-Unterstützung. Die CPU-Versuche verwenden die mitgelieferten Daten. Für den großen Lauf werten wir die gespeicherten Messreihen aus.
+Die CPU-Versuche verwenden die Daten und Gewichte im Repository. Die Befehle laufen in derselben PowerShell-Sitzung aus dem Projektverzeichnis. Für den Windows-Build genügt GCC mit C11-Unterstützung. Der Vergleich mit GPT-2 Small beruht auf den gespeicherten Messreihen.
 
-## 4.1 Kann die Zukunft eine frühere Vorhersage verändern?
+## 4.1 Kausalität des Decoders
 
-**Vorhersage.** Sehen zwei Eingaben bis einschließlich Position $t$ gleich aus, dann müssen ihre Logits an allen Positionen $0,\ldots,t$ übereinstimmen. Das gilt für zufällige Gewichte genauso wie für trainierte. Der kausale Decoder hat keinen Rechenpfad von einem späteren Token zu einem früheren Logit.
+Sind zwei Eingaben bis einschließlich Position $t$ identisch, müssen die Logits an allen Positionen $0,\ldots,t$ übereinstimmen. Im kausalen Decoder gibt es keinen Rechenpfad von einem späteren Token zu einem früheren Logit. Diese Vorhersage gilt für jede Wahl der Gewichte.
 
 ```powershell
 $labor = Join-Path (Get-Location).Path ('build-lernlabor-' + [Guid]::NewGuid().ToString('N'))
@@ -18,11 +18,11 @@ if ($LASTEXITCODE) { throw 'Der C-Build ist fehlgeschlagen.' }
 if ($LASTEXITCODE) { throw 'Ein Selbsttest ist fehlgeschlagen.' }
 ```
 
-Auf Linux oder macOS baut `make` dieselbe CPU-Anwendung. Ihr Selbsttest läuft mit `./nablaflow check`. Die Rechen- und Auswertungsbefehle in den folgenden Blöcken verwenden PowerShell.
+Unter Linux und macOS lauten die entsprechenden Befehle `make` und `./nablaflow check`.
 
-Der Test füttert ein kleines Modell erst mit `0 1 2 3 4`, dann mit `0 1 2 8 9` und schließlich mit `0 1 2`. Er vergleicht *alle* Logits der ersten drei Positionen bitweise. Schon eine Abweichung würde die Vorhersage für diese Eingaben widerlegen. Im geprüften CPU-Build bestanden alle Vergleiche. Der separate Gradiententest über 1.128 Parameter ergab eine maximale absolute Abweichung von $6{,}78\cdot10^{-5}$. [Tests `test_causality` und `test_gradients`](../../src/gpt.c)
+Der Test berechnet die Logits zuerst für `0 1 2 3 4`, dann für `0 1 2 8 9` und schließlich für `0 1 2`. An den ersten drei Positionen stimmten alle Logits in allen drei Rechnungen bitweise überein. Der separate Gradiententest über 1.128 Parameter ergab eine maximale absolute Abweichung von $6{,}78\cdot10^{-5}$. [Kausalitäts- und Gradiententest](../../src/gpt.c)
 
-**Ein Blick in einen trainierten Kopf.** Der Prompt `Links: rot.` enthält elf ASCII-Bytes. Mit dem Startsymbol erwarten wir zwölf Zeilen zu je zwölf Gewichten. Welche Summe muss jede Zeile haben?
+**Messung an einem trainierten Kopf.** Die elf ASCII-Bytes von `Links: rot.` und das Startsymbol ergeben zwölf Positionen. Der Export enthält also zwölf Zeilen zu je zwölf Gewichten. Die Softmax verlangt Zeilensumme eins. Die Maske schließt die $12\cdot11/2=66$ Positionen oberhalb der Diagonalen aus.
 
 ```powershell
 $a = & $nf inspect --model results/model.nfg --prompt 'Links: rot.' --layer 1 --head 0 | ConvertFrom-Csv
@@ -36,11 +36,11 @@ $future
 ($errors | Measure-Object -Maximum).Maximum
 ```
 
-Alle 66 Gewichte oberhalb der Diagonalen waren null. Die größte gemessene Abweichung der Zeilensumme von eins betrug $4{,}5\cdot10^{-8}$. Die Exportfunktion füllt die ausgeblendeten Zellen selbst mit Nullen auf. Erst der Eingriff in die *Eingabe* und der Vergleich der *Logits* prüfen, ob der gesamte Decoder die Kausalität einhält. [Gespeicherte Matrix](../../results/attention.csv) · [Exportfunktion `gpt_attention_row`](../../src/gpt.c)
+Alle 66 Einträge oberhalb der Diagonalen waren null. Die größte Abweichung einer Zeilensumme von eins betrug $4{,}5\cdot10^{-8}$. Die Exportfunktion trägt die Nullen selbst ein. Der Test mit dem veränderten Satzende prüft die stärkere Aussage, dass der spätere Text auch am Ausgang des gesamten Decoders keinen Einfluss hat. [Gemessene Attention-Matrix](../../results/attention.csv) · [Exportfunktion `gpt_attention_row`](../../src/gpt.c)
 
-## 4.2 Zwanzig Updates unter dem Mikroskop
+## 4.2 Zwanzig Trainingsschritte
 
-Ein gleichverteiltes Modell gibt dem richtigen Ziel $1/258$ Wahrscheinlichkeit. Auf Papier folgt daraus $-\ln(1/258)=5{,}553$ Nats pro Ziel. Zufällige Anfangsgewichte erzeugen leicht verschiedene Logits. Erwarte deshalb zu Beginn einen Wert in der Nähe dieser Zahl. Schreibe vor dem Start auf, ob du nach nur 20 Updates schon die Bigram-Tabelle schlagen würdest.
+Ein gleichverteiltes Modell gibt jedem Ziel die Wahrscheinlichkeit $1/258$. Sein Verlust beträgt $-\ln(1/258)=5{,}553$ Nats pro Ziel. Die kleinen zufälligen Anfangsgewichte des Decoders streuen die Logits um null. Zu Beginn erwarten wir einen Verlust nahe 5,553. Einen zweiten Vergleichswert liefert eine Bigramm-Tabelle, die aus den Trainingsdaten die Übergänge zwischen benachbarten Tokens zählt.
 
 ```powershell
 $run = Join-Path $labor 'kurzlauf'
@@ -50,11 +50,11 @@ Import-Csv (Join-Path $run 'history.csv') | Format-Table step,train_nll,val_nll
 & $nf eval --model (Join-Path $run 'model.nfg') --data data/val.txt
 ```
 
-Der hier ausgeführte Kurzlauf hatte 8.464 Parameter. Die Validierungs-NLL sank von 5,5476 auf 4,9881. Das kleinste gemessene Ergebnis lag bei Schritt 20. Das erneute Laden der Gewichte ergab 4,9881 auf denselben 2.496 Validierungszielen. Das Bigram kam mit seinen Häufigkeiten aus dem **Trainingssatz** schon auf 1,3375. Der kurze Lauf zeigt Lernen und liefert zugleich ein Beispiel dafür, weshalb der Anfangswert allein ein zu leichter Vergleich ist. Der Ausgabeordner für einen weiteren Lauf braucht einen neuen Namen. [Training, Messzeitpunkte und Auswahl der Gewichte](../../src/main.c) · [Bigram-Zählung](../../src/data.c)
+Der Decoder mit 8.464 Parametern startete bei 5,5476 Nats pro Validierungsziel. Nach 20 Schritten lag er bei 4,9881, dem niedrigsten gemessenen Wert. Das erneute Laden der Gewichte ergab auf denselben 2.496 Zielen wieder 4,9881. Die Bigramm-Tabelle erreichte dort 1,3375. Der Decoder hat also im Mittel höhere Wahrscheinlichkeiten für die beobachteten Tokens gelernt, liegt nach zwanzig Schritten aber noch weit hinter der Tabelle. [Training und Auswahl der Gewichte](../../src/main.c) · [Bigramm-Zählung](../../src/data.c)
 
-## 4.3 Sagt das trainierte Labormodell das richtige Fach voraus?
+## 4.3 Ein richtiges Byte und eine richtige Antwort
 
-Hier laden wir das umfangreicher trainierte, mitgelieferte Modell mit 35.776 Parametern. Für Training, Auswahl der Gewichte und Abschlusstest wurden ganze *ungeordnete* Wortpaare getrennt. Jede ausgewählte Belegung kommt im Test mit zwei Fragen vor. Insgesamt sind es 56 Aufgaben. [Generator und Aufteilung](../../tools/corpus.c) · [Testfragen mit Sollantworten](../../data/recall.tsv)
+Das gespeicherte Labormodell hat 35.776 Parameter. Der Datengenerator teilt nach *ungeordneten* Wortpaaren auf. „Glas und Harz“ gehört also mit beiden Anordnungen zu genau einem Split. Im Test gibt es 28 Belegungen mit jeweils zwei Gegenfragen, insgesamt 56 Aufgaben. [Generator und Aufteilung](../../tools/corpus.c) · [Testfragen mit Sollantworten](../../data/recall.tsv)
 
 ```powershell
 & $nf eval --model results/model.nfg --data data/test.txt --train data/train.txt
@@ -63,11 +63,11 @@ Hier laden wir das umfangreicher trainierte, mitgelieferte Modell mit 35.776 Par
 & $nf sample --model results/model.nfg --prompt 'Fach A: Glas. Fach B: Harz. In B liegt ' --temperature 0 --tokens 8
 ```
 
-* **Nächster Token.** Bei `eval` bekommt das Modell für jeden Schritt die tatsächlichen vorhergehenden Tokens im Block. Auf 2.490 Zielen ergibt sich eine NLL von 0,23928 und damit eine Perplexität von 1,27034. Das Bigram erreicht 3,68206. Leerzeichen, Satzmuster, Namen und Endmarker gehen alle in diesen Mittelwert ein. [Gespeicherte Testmessung](../../results/test.csv)
-* **Ganze Antwort.** `recall` wählt pro Schritt das wahrscheinlichste der 258 Symbole und bewertet die Antwort bis einschließlich Punkt. Ein einziger falscher Schritt kostet den Treffer. Der mitgelieferte Checkpoint erreicht beim erneuten Ausführen 26/56. Die Regel „wiederhole den ersten genannten Wert“ trifft bei den beiden möglichen Fragen immer genau eine Antwort, insgesamt also 28/56. [Gespeicherter Recall](../../results/recall.csv) · [Bewertung der Antworten](../../src/recall.c)
-* **Einzelfall.** Die beiden Beispielprompts ergeben jeweils `Glas.`. Beim Wechsel zu B wäre `Harz.` richtig. `sample` mit Temperatur null wählt unter den zulässigen, im Training beobachteten Ausgabebytes und dem Endsymbol. Das eignet sich zum Lesen einzelner Antworten. Für alle folgenden Zählungen verwenden wir die feste Definition aus `recall`. [Byte-Sampler](../../src/main.c)
+* **Tokenwahrscheinlichkeit.** `eval` gibt bis zu jeder Zielposition die im Text tatsächlich vorkommenden Tokens vor. Über die 2.490 Ziele beträgt die NLL 0,23928, die Perplexität 1,27034. Die Bigramm-Tabelle kommt auf eine Perplexität von 3,68206. Leerzeichen und Endmarker gehen ebenso in den Mittelwert ein wie die Buchstaben des gesuchten Wortes. [Testmessung](../../results/test.csv)
+* **Vollständige Antwort.** `recall` erzeugt bei jedem Schritt das wahrscheinlichste der 258 Symbole. Bis einschließlich Punkt müssen alle Bytes stimmen. Das Modell erfüllt diese Bedingung bei 26 von 56 Fragen. Wer stets den zuerst genannten Wert kopiert, löst bei jeder Belegung genau eine der beiden Fragen und erreicht 28 von 56. [Gemessene Treffer](../../results/recall.csv) · [Bewertung der Antworten](../../src/recall.c)
+* **Glas und Harz.** Bei Temperatur null ergänzt `sample` beide Fragen mit `Glas.`. Für Fach B lautet die richtige Antwort `Harz.`. Beim freien Schreiben lässt `sample` nur zulässige, im Training beobachtete Ausgabebytes und das Endsymbol zu. Für die Trefferzahlen gilt durchgehend die Auswahlregel von `recall`. [Byte-Sampler](../../src/main.c)
 
-**Gegenprobe mit konstant gehaltener Belegung.** Die Gesamtzahl 26 lässt offen, ob das Modell jemals *beide* Fragen zur selben Belegung richtig beantwortet. Formuliere zwei Vorhersagen. Ein Modell, das die Zuordnung auf jedem Beispiel beherrscht, sollte 28 Doppel-Treffer erzielen. Ein Modell, das unabhängig von der Frage immer den ersten Wert kopiert, sollte null erzielen. Im TSV stehen die zwei Gegenfragen unmittelbar nacheinander.
+**Gegenprobe.** Wie oft stimmen *beide* Antworten zur selben Belegung? Eine vollständige Zuordnung ergäbe 28 Doppeltreffer, das Kopieren des ersten Werts null. In der TSV-Datei stehen die Gegenfragen zu jeder Belegung unmittelbar nacheinander.
 
 ```powershell
 $rows = @(Get-Content -Encoding UTF8 data/recall.tsv)
@@ -83,9 +83,9 @@ for ($i = 0; $i -lt $rows.Count; $i += 2) {
 $counts    # Belegungen mit null, einer und zwei richtigen Antworten
 ```
 
-Die erneute Messung ergibt **5, 20, 3**. Die Summen stimmen mit den Einzelmessungen überein. Es sind $5+20+3=28$ Belegungen und $20+2\cdot3=26$ Treffer. In drei Belegungen führt die geänderte Frage zur jeweils richtigen, unterschiedlichen Antwort. Die fünf vollständigen Fehlschläge widerlegen die Erklärung, der Decoder kopiere ausnahmslos den ersten Wert. Welche interne Rechnung die drei Erfolge ermöglicht, bleibt offen.
+Bei **5 Belegungen** sind beide Antworten falsch, bei **20** ist eine richtig und bei **3** sind beide richtig. Das ergibt $5+20+3=28$ Belegungen und $20+2\cdot3=26$ richtige Einzelantworten. Bei den drei Doppeltreffern führt allein der Wechsel der Frage zur passenden, jeweils anderen Antwort.
 
-**Ablation.** Entferne aus jedem Prompt die beiden Zuweisungen. Frage und Sollantwort bleiben identisch, derselbe Checkpoint beantwortet dieselben 56 Aufgaben. Überlege vorab, wie viele verschiedene Prompts danach noch übrig sind.
+**Versuch ohne Belegung.** Aus jeder Testzeile entfallen beide Zuweisungen. Übrig bleiben die Frage und ihre ursprüngliche Sollantwort. Die Gewichte des Modells bleiben fest.
 
 ```powershell
 $short = $rows -replace '^[^.]+\. [^.]+\. ', ''
@@ -94,23 +94,23 @@ $file = Join-Path $labor 'ohne-belegung.tsv'
 & $nf recall results/model.nfg $file
 ```
 
-Es bleiben vier Frageformen. Bei unveränderten Sollantworten sinkt die Zahl der Treffer durch das Entfernen der Belegung von 26 auf 0 bei 56 Aufgaben. Gleichzeitig ändern sich Länge, Position der Frage und Satzform. Die Ablation allein kann den Rückgang keinem bestimmten Attention-Kopf zuschreiben. Beide Zusatzauswertungen beschreiben den bereits veröffentlichten Checkpoint auf seinem bekannten Testset. Für die Auswahl einer neuen Modellvariante gehören solche Vergleiche auf die Validierungsdaten.
+Die 56 gekürzten Prompts haben vier verschiedene Formen. Das Modell trifft jetzt **0 von 56** Antworten. Mit der Belegung fehlen auch der vertraute Satzanfang und die bisherige Position der Frage. Aus diesem Eingriff lässt sich daher kein einzelner Attention-Kopf als Ursache bestimmen. Beide Versuche beschreiben den gespeicherten Checkpoint auf seinem bekannten Testsatz.
 
 ## 4.4 Shakespeare und die Einheit des Vergleichs
 
-Die folgende Tabelle verwendet die **gespeicherten Referenzläufe**. Die Test-NLL ist jeweils die mittlere Überraschung des tatsächlich folgenden Tokens unter seinem vorhandenen Kontext. Die Referenzmodelle beziehen ihre Häufigkeiten aus dem zugehörigen Trainingstext. Innerhalb jeder Zeile werden dieselben Zielpositionen gewertet.
+Die Test-NLL der drei Referenzläufe ist jeweils die mittlere negative Log-Wahrscheinlichkeit des beobachteten Tokens bei gegebener Vorgeschichte. Die Häufigkeiten für Bigramm und Unigramm stammen aus dem zugehörigen Trainingstext. Innerhalb jeder Tabellenzeile sind die gewerteten Zielpositionen identisch.
 
 | Testkorpus | Einheit und Anzahl der Ziele | Referenzmodell, NLL | Transformer, NLL | Gewählter Schritt |
 | --- | --- | ---: | ---: | ---: |
-| Deutsche Laborprotokolle | Bytes und Satzendmarker, 2.490 | Bigram 1,30347 | 0,23928 | 1.000 |
-| *Coriolanus*-Auszug | Bytes und Passagenendmarker, 6.819 | Bigram 2,36989 | 1,94319 | 1.700 |
+| Deutsche Laborprotokolle | Bytes und Satzendmarker, 2.490 | Bigramm 1,30347 | 0,23928 | 1.000 |
+| *Coriolanus*-Auszug | Bytes und Passagenendmarker, 6.819 | Bigramm 2,36989 | 1,94319 | 1.700 |
 | *Tiny Shakespeare*, GPT-2 Small | GPT-2-BPE-Tokens einschließlich EOT, 13.564 | Unigramm 6,68371 | 5,17077 | 2.400 |
 
-Die Versuchsprotokolle dokumentieren die Auswahl der Texte, die Trainingsbedingungen und die Testwerte. [Labormodell](../byte-models.md) · [Kleines Shakespeare-Modell](../../results/shakespeare/README.md) · [GPT-2 Small](../training-124m.md)
+Die beiden Shakespeare-Läufe verwenden verschiedene Textausschnitte und verschiedene Tokenisierungen. [Labormodell](../byte-models.md) · [Kleines Shakespeare-Modell](../../results/shakespeare/README.md) · [GPT-2 Small](../training-124m.md)
 
-**Übung 1. Welcher Trainingsschritt zählt?** Im gespeicherten Laborlauf sinkt die NLL auf der festen Trainingsstichprobe zwischen Schritt 1.000 und 1.800 von 0,1660 auf 0,1498. Die Validierungs-NLL steigt von 0,2374 auf 0,2490. Mit welchen Gewichten würdest du den Test ausführen? [Vollständige Messreihe](../../results/history.csv)
+**Übung 1. Auswahl der Gewichte.** Zwischen Schritt 1.000 und 1.800 sinkt im Laborlauf die NLL auf der festen Trainingsstichprobe von 0,1660 auf 0,1498. Die Validierungs-NLL steigt von 0,2374 auf 0,2490. Welcher der beiden Stände wird für den Test ausgewählt, wenn die Validierungs-NLL entscheidet? [Vollständige Messreihe](../../results/history.csv)
 
-**Auflösung.** Mit denen aus Schritt 1.000. Das war das Minimum auf der vollständigen Validierungsmenge unter den geprüften Schritten. Die Testdaten bleiben bei dieser Entscheidung außen vor. Bei GPT-2 lässt sich dieselbe Auswahl aus der Datei rekonstruieren und mit dem gespeicherten Nachladen vergleichen.
+Schritt 1.000 hat den kleineren Validierungsverlust und erreicht auch unter allen Messpunkten das Minimum. Für GPT-2 Small lässt sich die Auswahl mit der Auswertung des neu geladenen Checkpoints vergleichen.
 
 ```powershell
 Import-Csv results/gpt2-124m/history.csv | Sort-Object { [double]$_.val_nll } | Select-Object -First 1 | Format-Table step,tokens,val_nll
@@ -123,6 +123,6 @@ Das Minimum und die Auswertung nach dem Laden ergeben beide 4,14468463 Nats pro 
 
 **Auflösung.** Ein Bit entspricht $\ln 2$ Nats. Der *Coriolanus*-Gewinn beträgt $(2{,}36989-1{,}94319)/\ln 2=0{,}616$ Bits pro Byte- oder Endmarkerziel. Für GPT-2 folgt aus $\mathrm{PPL}=e^{\mathcal L}$ das Verhältnis $e^{6{,}68371-5{,}17077}=4{,}54$. So viel größer ist auch das geometrische Mittel der Wahrscheinlichkeit, die GPT-2 den richtigen Testtokens gibt, gegenüber dem Unigramm. Für einen direkten Größenvergleich zwischen Byte-Modell und GPT-2 bräuchten wir denselben Text, vergleichbare Kontextgrenzen und eine gemeinsame Bezugsgröße, etwa die gesamte negative Log-Wahrscheinlichkeit in Bits pro Originalbyte bei festgelegter Behandlung der Endmarker. [Byte-Testwerte](../../results/shakespeare/test.csv) · [BPE-Testwerte](../../results/gpt2-124m/test.csv) · [Unigramm](../../results/gpt2-124m/unigram-test.csv)
 
-**Offene Messfrage.** Warum ist der GPT-2-Testverlust höher als der Validierungsverlust? Die in Quellreihenfolge gebildeten Splits enthalten unterschiedlich viele Reden mit im Training ungesehenen Sprecherüberschriften, 86/361 in der Validierung und 290/362 im Test. Das macht die Sprecherzeilen zu einer prüfbaren Hypothese. Werte als Folgeexperiment dieselben Modellvorhersagen einmal über die Überschrift und einmal über den restlichen Redetext aus. Pro Gruppe brauchst du die Summe der negativen Log-Wahrscheinlichkeiten und die Zahl der Ziele. Bleibt der Unterschied auch im Redetext groß, reichen die Überschriften als Erklärung nicht aus. [Metadaten und genaue Zählregel](../../results/gpt2-124m/data.json)
+**Hypothese zum Unterschied zwischen Validierung und Test.** Die Abschnitte folgen der Reihenfolge im Quelltext. In der Validierung tragen 86 von 361 Reden eine im Training ungesehene Sprecherüberschrift, im Test 290 von 362. Ein höherer Verlust auf den Überschriften könnte deshalb einen Teil des höheren Testverlusts erklären. Eine Gegenprobe würde für Überschrift und gesprochenen Text getrennt die Summe der negativen Log-Wahrscheinlichkeiten und die Zahl der Ziele erfassen. Ein großer verbleibender Unterschied im gesprochenen Text würde eine Erklärung allein aus den Überschriften ausschließen. [Metadaten und Zählregel](../../results/gpt2-124m/data.json)
 
 [Weiter zum kontrollierten Versuch mit vierfachem Antwortgewicht](05-antwortgewicht.md) · [Übersicht](README.md)

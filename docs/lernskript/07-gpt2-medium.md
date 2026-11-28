@@ -1,54 +1,54 @@
-# 7 · Passt GPT-2 Medium zum Training auf eine 12-GB-Karte?
+# 7 · GPT-2 Medium auf der RTX 4070 SUPER
 
-**Ja, für vier Fenster mit je 128 Tokens.** Eine RTX 4070 SUPER führte 64 vollständige Trainingsschritte eines zufällig initialisierten GPT-2 Medium mit **354.823.168 Parametern** aus. Die beiden großen CUDA-Speicherreservierungen des Trainers umfassten zusammen **6,25 GiB**. Die höchste beobachtete Belegung der *gesamten Karte* lag bei **7,92 GiB**. Um diese Zahlen einzuordnen, verfolgen wir ein Gewicht vom Checkpoint bis zu seinem ersten Update.
+**Wie viel Grafikspeicher braucht ein Trainingsschritt mit 355 Millionen Parametern?** Für vier Textfenster mit je 128 Tokens reservierte der Trainer **6,25 GiB** an Puffern. Auf der gesamten RTX 4070 SUPER waren zeitweise **7,92 GiB** belegt. Mit dieser Konfiguration absolvierte GPT-2 Medium 64 Trainingsschritte.
 
-[![Links der zeitliche Verlauf der belegten GiB, rechts Kartenanstieg, CUDA-Delta und Trainersumme auf einer eigenen GiB-Skala.](../../results/gpt2-medium-355m/memory.png)](../../results/gpt2-medium-355m/memory.svg)
+[![Speicherverlauf der gesamten Karte und Vergleich von Kartenanstieg, CUDA-Messung und berechneter Puffersumme.](../../results/gpt2-medium-355m/memory.png)](../../results/gpt2-medium-355m/memory.svg)
 
-**Abbildung 1.** Panel (a) zeigt 244 Abfragen der gesamten Karte. Das Quadrat markiert den Ausgangswert, das Dreieck die höchste gemessene Belegung. In Panel (b) steht das Dreieck für die Differenz aus beiden. Der offene Kreis zeigt den größten Zuwachs an den synchronisierten CUDA-Messpunkten gegenüber dem aktiven Kontext vor cuBLAS. Die Raute ist die aus dem Trainer berechnete Puffersumme. Die Ordinatenskalen unterscheiden sich. [Druckfassung](../../results/gpt2-medium-355m/memory.pdf) · [Animation der 244 Messpunkte](../../results/gpt2-medium-355m/memory.gif)
+**Abbildung 1.** (a) Belegter Speicher der gesamten Karte über die Zeit. Von den 244 Messpunkten sind der Wert vor Prozessstart (Quadrat) und das beobachtete Maximum (Dreieck) markiert. (b) Speicherzuwachs in GiB mit eigener Skala. Das Dreieck gibt das Maximum aus (a) abzüglich des Anfangswerts an. Der offene Kreis zeigt den größten von CUDA gemeldeten Zuwachs gegenüber dem bereits aktiven Kontext vor dem Laden von cuBLAS. Die Raute markiert die Summe der beiden Puffergrößen im Trainer. [Druckfassung](../../results/gpt2-medium-355m/memory.pdf) · [Animation der 244 Messpunkte](../../results/gpt2-medium-355m/memory.gif)
 
-Auf der Zeitachse liegt vor dem Anstieg auch die Erzeugung der Startgewichte auf der CPU. Der Abfall am Ende gehört zum Beenden des Trainers. Die Zeitachse stammt vom äußeren Messprogramm. Die interne Trainingsuhr startet erst nach der GPU-Initialisierung. [Messpunkte der Karte](../../results/gpt2-medium-355m/board-memory.csv) · [CUDA-Messpunkte](../../results/gpt2-medium-355m/memory.csv) · [Maschinenlesbares Versuchsprotokoll](../../results/gpt2-medium-355m/run.json)
+Die Zeitachse beginnt beim Start des äußeren Messprogramms. Vor dem steilen Anstieg erzeugt der Trainer die Anfangsgewichte auf der CPU. Beim Beenden fällt die Belegung wieder ab. Die interne Trainingsuhr beginnt erst nach der GPU-Initialisierung. [Messpunkte der Karte](../../results/gpt2-medium-355m/board-memory.csv) · [CUDA-Messpunkte](../../results/gpt2-medium-355m/memory.csv) · [Versuchsprotokoll](../../results/gpt2-medium-355m/run.json)
 
-## 1. Was wird trainiert?
+## Vom einzelnen Gewicht zum Checkpoint
 
-Der Decoder hat 24 Blöcke, eine Breite von 1.024 und 16 Köpfe pro Block. Ein Kopf verarbeitet also $1\,024/16=64$ Komponenten. Das MLP erweitert die Darstellung vorübergehend auf 4.096 Komponenten. Die Tokentabelle enthält 50.257 Einträge, die Positionstabelle 1.024. Das sind die veröffentlichten GPT-2-Medium-Abmessungen. Der Versuch nutzt pro Trainingsfenster die ersten 128 Positionen. Alle Modellgewichte starten aus der Initialisierung dieses Projekts. [Originalkonfiguration](https://openaipublic.blob.core.windows.net/gpt-2/models/355M/hparams.json) · [Konfiguration und Trainingsschleife](../../tools/nfgpu.c)
+GPT-2 Medium hat $L=24$ Blöcke der Breite $d=1\,024$. Auf jeden der 16 Attention-Köpfe entfallen damit 64 Komponenten. Das MLP erweitert den Vektor jeder Position vorübergehend auf 4.096 Komponenten. Die Tokentabelle enthält einen Vektor für jedes der $V=50\,257$ Tokens, die Positionstabelle einen für jede der $C=1\,024$ Positionen. Das entspricht den veröffentlichten Abmessungen von GPT-2 Medium. Der Kurzlauf nutzt davon die ersten 128 Positionen je Fenster. Er beginnt mit den zufällig initialisierten Gewichten des Projekts. [Originalkonfiguration](https://openaipublic.blob.core.windows.net/gpt-2/models/355M/hparams.json) · [Konfiguration und Trainingsschleife](../../tools/nfgpu.c)
 
-Die Parameterformel aus Kapitel 2 gibt mit Vokabular $V$, Positionszahl $C$, Breite $d$ und Blockzahl $L$
+Die Parameterzahl setzt sich aus den beiden Tabellen, den 24 Blöcken und der letzten Normierung zusammen. Mit der Zählformel aus Kapitel 2 ergibt sich
 
 $$
 N=(V+C)d+L(12d^2+13d)+2d
 =354\,823\,168.
 $$
 
-Ein Parameter belegt als FP32-Zahl vier Byte. Der reine Gewichtssatz braucht $4N=1\,419\,292\,672$ Byte oder **1,322 GiB**. Der gespeicherte Checkpoint ist genau 300 Byte größer. Seine Zusatzbytes enthalten unter anderem Modellabmessungen und Prüfsumme. Ein GiB entspricht $2^{30}$ Byte, ein MiB $2^{20}$ Byte. [Parameterzählung](02-transformer.md#zählen-als-unabhängige-kontrolle) · [Checkpointformat](../../src/checkpoint.c)
+Ein Gewicht belegt in FP32 vier Byte. Alle Gewichte zusammen brauchen also $4N=1\,419\,292\,672$ Byte oder **1,322 GiB**. Das lässt sich an der Checkpoint-Datei prüfen. Sie ist genau 300 Byte größer und enthält neben den Gewichten unter anderem die Modellabmessungen und eine Prüfsumme. Ein GiB entspricht $2^{30}$ Byte, ein MiB $2^{20}$ Byte. [Parameterzählung](02-transformer.md#zählen-als-unabhängige-kontrolle) · [Checkpointformat](../../src/checkpoint.c)
 
-## 2. Warum braucht das Training mehr als der Gewichtssatz?
+## Was kommt beim Training zu den Gewichten hinzu?
 
-Nimm einen Eintrag der Query-Matrix. Im Vorwärtslauf liest die GPU seinen aktuellen Wert. Im Rückwärtslauf sammelt sie die Ableitung des Verlusts nach diesem Wert. AdamW hält zusätzlich einen gleitenden Mittelwert der Ableitung und einen Mittelwert ihres Quadrats. Der Trainer reserviert für jede dieser vier Größen ein FP32-Feld mit $N$ Einträgen. Für alle Parameter zusammen ergibt das **$16N=5\,677\,170\,688$ Byte**.
+Für einen Eintrag der Query-Matrix liest der Vorwärtslauf dessen Wert $w$. Der Rückwärtslauf liefert den Gradienten $g=\partial\mathcal L/\partial w$. Für das Update speichert AdamW außerdem zwei gleitende Mittelwerte, einen für $g$ und einen für $g^2$. Gewicht, Gradient und beide Momente belegen zusammen vier FP32-Zahlen, also 16 Byte je Parameter. Für das ganze Modell ergeben sich **$16N=5\,677\,170\,688$ Byte**.
 
-Die Vorwärtsrechnung erzeugt außerdem Zwischenwerte, die der Rückwärtslauf wieder braucht. Bei $B=4$ und $T=128$ verarbeitet ein Batch 512 Positionen. Allein die Logits brauchen $512\cdot50\,257\cdot4=102\,926\,336$ Byte. Für die Attention legt jeder Block ein dichtes Feld mit $B\cdot H\cdot T^2$ FP32-Einträgen an. Bei 16 Köpfen sind das 4 MiB pro Block und 96 MiB für die 24 Blöcke. Die Kausalmaske beschränkt, auf welche Positionen ein Token zugreifen darf. Die Implementierung reserviert das ganze Quadrat. [Pufferaufteilung in `allocate_state`](../../src/gpu.c) · [CUDA-Kernel](../../src/gpu_kernels.cu)
+Ein zweiter Puffer hängt von der Fensterlänge ab. Vier Fenster ($B=4$) mit je $T=128$ Tokens liefern 512 Positionen. Pro Position hält der Trainer einen Logit für jedes Token im Vokabular. Allein diese Werte brauchen $512\cdot50\,257\cdot4=102\,926\,336$ Byte. Bei der Attention trifft jede der $T$ Query-Positionen auf $T$ mögliche Key-Positionen. Selbst mit Kausalmaske reserviert dieser Trainer pro Kopf und Fenster das ganze $T\times T$-Feld. Bei $H=16$ Köpfen belegt es $4BHT^2$ Byte je Block. Das sind 4 MiB pro Block, also 96 MiB für die 24 Blöcke. [Pufferaufteilung in `allocate_state`](../../src/gpu.c) · [CUDA-Kernel](../../src/gpu_kernels.cu)
 
-| Was der Speicheraufruf reservierte | Byte | GiB |
+| Vom Trainer reservierter Speicher | Byte | GiB |
 | --- | ---: | ---: |
-| Gewichte, Gradienten, beide Adam-Momente | 5.677.170.688 | 5,2873 |
-| Gemeinsamer Puffer für Zwischenwerte, Logits und Rechenhilfen | 1.038.462.976 | 0,9671 |
+| Gewichte, Gradienten und beide Adam-Momente | 5.677.170.688 | 5,2873 |
+| Zwischenwerte, Logits und Arbeitsfelder | 1.038.462.976 | 0,9671 |
 | **Summe** | **6.715.633.664** | **6,2544** |
 
-Die Implementierung reserviert beide Bereiche vor dem ersten Trainingsschritt und verwendet sie danach für jeden Batch erneut. Dadurch entsteht das lange Plateau in der Grafik.
+Beide Puffer stehen schon vor dem ersten Trainingsschritt bereit. Jeder weitere Schritt nutzt denselben Platz. Das erklärt, weshalb die Belegung nach dem Anstieg in Abb. 1a über viele Schritte fast konstant bleibt.
 
-## 3. Wie wurde der Verbrauch gemessen?
+## Warum liefern die Messungen verschiedene Werte?
 
-| Beobachter | Bezugspunkt | Höchster beobachteter Stand | Zunahme |
+| Messung | Bezugspunkt | Höchste beobachtete Belegung | Zunahme |
 | --- | ---: | ---: | ---: |
-| CUDA-Treiber, `cuMemGetInfo` | 1,202 GiB belegt unmittelbar nach Anlage des CUDA-Kontexts | 7,471 GiB an den synchronisierten Messpunkten | **6,270 GiB** |
-| `nvidia-smi`, ganze Karte | 1.450 MiB unmittelbar vor Prozessstart | 8.111 MiB im laufenden Prozess | **6.661 MiB = 6,505 GiB** |
+| CUDA-Treiber, `cuMemGetInfo` | 1,202 GiB nach Anlage des CUDA-Kontexts | 7,471 GiB an den synchronisierten Messpunkten | **6,270 GiB** |
+| `nvidia-smi`, gesamte Karte | 1.450 MiB vor Prozessstart | 8.111 MiB während des Laufs | **6.661 MiB = 6,505 GiB** |
 
-Die interne Messung synchronisiert die GPU und liest den vom Treiber gemeldeten freien und gesamten Speicher. Sie erfasst den Kontext vor dem Laden der Rechenbibliotheken, die fertig geladenen Bibliotheken, die Puffer nach dem Hochladen der Startgewichte sowie die Auswertung, den Rückwärtslauf und das Update an protokollierten Schritten. Nach dem Hochladen lag der belegte Speicher 6.420 MiB über der ersten Kontextmessung. Zwischen dieser Zunahme und den expliziten Puffern liegen rund 15,5 MiB. [Interne Rohmessung](../../results/gpt2-medium-355m/memory.csv) · [NVIDIA-Dokumentation zur CUDA-Speicherabfrage](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html)
+Der Trainer wartet an ausgewählten Stellen, bis die GPU ihre Arbeit beendet hat. Dann fragt er den freien und gesamten Speicher beim CUDA-Treiber ab. Ihre Differenz ist die Belegung. Nach dem Laden der Rechenbibliotheken und dem Hochladen der Gewichte lag sie 6.420 MiB über dem ersten Wert beim Anlegen des Kontexts. Das sind rund 15,5 MiB mehr als die beiden reservierten Puffer zusammen. Bei den späteren Abfragen nach Validierung, Textgenerierung, Rückwärtslauf und Update meldete CUDA dieselbe Belegung. [Interne Rohmessung](../../results/gpt2-medium-355m/memory.csv) · [NVIDIA-Dokumentation zur CUDA-Speicherabfrage](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html)
 
-Der zweite Beobachter läuft außerhalb des Trainers. Er fragt `nvidia-smi` mit einem Zielintervall von 100 ms ab und erfasst vor, während und nach dem Lauf insgesamt 244 Messpunkte. Beim höchsten Wert waren noch **3.889 MiB frei**. Nach Prozessende wurden 1.423 MiB als belegt gemeldet. Die Kartenanzeige schließt andere Anwendungen ein. Unterschiedliche Bezugspunkte, Betriebssystem und Treiberrechnung beeinflussen den Vergleich mit CUDA. Sehr kurze Spitzen zwischen zwei Abfragen können der Messung entgehen. Deshalb ist 7,92 GiB der **höchste beobachtete** Kartenwert dieses Laufs. [Äußeres Messprogramm](../../tools/measure_gpu_run.py) · [NVIDIA-Dokumentation zur Kartenbelegung](https://docs.nvidia.com/deploy/nvidia-smi/index.html#fb-memory-usage)
+Das äußere Messprogramm fragt `nvidia-smi` in einem angestrebten Abstand von 100 ms ab. Seine 244 Messpunkte umfassen die gesamte Laufzeit und schließen den Speicher anderer Anwendungen ein. Beim höchsten Messwert von 8.111 MiB waren laut Kartenanzeige noch **3.889 MiB frei**. Nach Prozessende lag die Belegung bei 1.423 MiB. Der Bezugspunkt liegt hier vor dem Start des Trainers. Auch die Speicherabrechnung unterscheidet sich zwischen CUDA und Kartenanzeige. Kürzere Spitzen können zwischen zwei Abfragen liegen. [Äußeres Messprogramm](../../tools/measure_gpu_run.py) · [NVIDIA-Dokumentation zur Kartenbelegung](https://docs.nvidia.com/deploy/nvidia-smi/index.html#fb-memory-usage)
 
-## 4. Hat das Modell dabei wirklich gelernt?
+## Was hat sich nach 64 Updates geändert?
 
-Trainiert wurde auf dem bestehenden, vorab tokenisierten *Tiny-Shakespeare*-Korpus. Seed 42 steuert Initialisierung und Auswahl der Trainingsfenster. Jeder Schritt umfasst Vorwärtspass, Kreuzentropie, Rückwärtspass und ein AdamW-Update. Die Lernrate steigt in diesem kurzen Lauf über sechs Updates auf 0,0003 und fällt anschließend bis 0,00003. Die Matrizen werden in FP32 gespeichert, für große Matrixprodukte lässt der Trainer TF32 zu. [Lernrate und Update](../../tools/nfgpu.c) · [64 Batchmessungen](../../results/gpt2-medium-355m/batches.csv)
+Trainings- und Validierungstext stammen aus getrennten Teilen von *Tiny Shakespeare*. Seed 42 legt die Initialisierung und die Auswahl der Trainingsfenster fest. Jeder der 64 Schritte berechnet die Kreuzentropie für $4\cdot128=512$ Zielpositionen, führt den Rückwärtslauf aus und aktualisiert die Gewichte mit AdamW. Die Lernrate steigt in den ersten sechs Updates auf 0,0003 und sinkt bis zum letzten auf 0,00003. Die Matrizen liegen im Speicher als FP32-Zahlen vor. Für große Matrixprodukte lässt der Trainer TF32 zu. [Lernrate und Update](../../tools/nfgpu.c) · [64 Batchmessungen](../../results/gpt2-medium-355m/batches.csv)
 
 | Updates | Verarbeitete Trainingsziele | Verlust auf 13.106 Validierungszielen, Nats/Token |
 | ---: | ---: | ---: |
@@ -56,11 +56,11 @@ Trainiert wurde auf dem bestehenden, vorab tokenisierten *Tiny-Shakespeare*-Korp
 | 32 | 16.384 | 6,52701 |
 | 64 | 32.768 | **6,36462** |
 
-Danach wurde der Trainer beendet und der beste Checkpoint in einem neuen Prozess geladen. Die erneute Auswertung ergab **6,36461656** Nats pro Token, identisch zur letzten Messung auf die gespeicherten Stellen. Die Gewichte geben den richtigen Folgetokens auf diesen zurückgehaltenen Texten im Mittel höhere Wahrscheinlichkeit. Eine Aussage über die Qualität frei geschriebener Dialoge würde einen eigenen Sprachtest erfordern. [Verlustkurve](../../results/gpt2-medium-355m/history.csv) · [Messung nach erneutem Laden](../../results/gpt2-medium-355m/validation-reload.csv) · [Erzeugte Tokenfolgen](../../results/gpt2-medium-355m/samples.csv)
+Welche Wahrscheinlichkeit gibt das Modell den richtigen Folgetokens in einem ungelesenen Text? Bei einem mittleren Verlust $\mathcal L=-\langle\ln p\rangle$ ist $e^{-\mathcal L}$ das geometrische Mittel dieser Wahrscheinlichkeiten. Auf denselben 13.106 Validierungszielen stieg es um den Faktor $e^{11{,}09613-6{,}36462}\approx113$. Nach dem Laden des besten Checkpoints in einem neuen Prozess ergab sich erneut ein Validierungsverlust von **6,36461656** Nats pro Token, auf alle protokollierten Stellen gleich. Ob das Modell auch zusammenhängende Dialoge schreibt, wäre eine eigene Frage an die erzeugten Texte. [Verlustkurve](../../results/gpt2-medium-355m/history.csv) · [Messung nach erneutem Laden](../../results/gpt2-medium-355m/validation-reload.csv) · [Erzeugte Tokenfolgen](../../results/gpt2-medium-355m/samples.csv)
 
-## 5. Wie wiederhole ich den Versuch?
+## Den Lauf wiederholen
 
-Die folgenden Befehle laufen unter PowerShell im Stammverzeichnis. Für eine neue Installation führe zuerst **Abschnitt 1 und 2** der bestehenden GPU-Anleitung aus. Sie installieren die verwendeten cuBLAS- und NVRTC-Versionen und erzeugen die drei überprüfbaren Datensplits sowie den Prompt. Für das äußere Messprogramm genügt Python 3 mit Standardbibliothek. Setze `$py` auf deinen Python-Interpreter. [GPU-Einrichtung und Datensplits](../training-124m.md) · [Datei-Prüfsummen dieses Laufs](../../results/gpt2-medium-355m/run.json)
+Die Befehle laufen in einer PowerShell-Sitzung im Stammverzeichnis des Projekts. Die Abschnitte 1 und 2 der GPU-Anleitung beschreiben die Vorbereitung. Sie installieren die verwendeten cuBLAS- und NVRTC-Versionen und erzeugen die drei Datensätze für Training, Validierung und Test sowie den Prompt. Das äußere Messprogramm benötigt nur Python 3 mit Standardbibliothek. `$py` bezeichnet den verwendeten Python-Interpreter. [GPU-Einrichtung und Datensplits](../training-124m.md) · [Datei-Prüfsummen dieses Laufs](../../results/gpt2-medium-355m/run.json)
 
 ~~~powershell
 $py = 'python'
@@ -75,7 +75,7 @@ if ($LASTEXITCODE) { throw 'Build fehlgeschlagen' }
 if ($LASTEXITCODE) { throw 'CPU/GPU-Vergleich fehlgeschlagen' }
 ~~~
 
-Der äußere Ordner wird hier neu angelegt. Den inneren Ordner `run` erzeugt der Trainer. Mit jedem neuen äußeren Ordner kann man den Versuch wiederholen und die Messreihen getrennt aufbewahren.
+Jede Wiederholung erhält mit dem nächsten Befehl ein eigenes Verzeichnis. Darin schreibt der Trainer seine Dateien nach `run`, das äußere Messprogramm schreibt die Kartenbelegung nach `board-memory.csv`.
 
 ~~~powershell
 $experiment = New-Item -ItemType Directory -Path ('run-medium-' + [Guid]::NewGuid().ToString('N'))
@@ -90,28 +90,30 @@ Import-Csv $board | Sort-Object { [int]$_.used_mib } -Descending | Select-Object
 Import-Csv "$run/memory.csv" | Where-Object phase -eq 'buffers_ready'
 ~~~
 
-Die fünf Zahlen nach `$run` bedeuten der Reihe nach **Updates, Fensterlänge, Batchgröße, Auswertungsintervall und Seed**. Das letzte Argument `medium` wählt die größere Architektur. Wer direkt mit dem veröffentlichten Checkpoint arbeiten möchte, erhält die Binärdatei mit Git LFS. Sie ist **1.419.292.972 Byte** groß. Der SHA-256-Wert im Versuchsprotokoll erlaubt den Vergleich mit dem Original. Bei einem neu trainierten Modell können sich wegen der Reihenfolge paralleler Fließkommaadditionen einzelne Gewichte unterscheiden. [Checkpoint](../../results/gpt2-medium-355m/best.nfg) · [Prüfsumme und Konfiguration](../../results/gpt2-medium-355m/run.json) · [Abbildung aus den CSV-Dateien neu erzeugen](../../tools/plot_medium_memory.py)
+Die Argumente `64 128 4 32 42` stehen für Updates, Fensterlänge, Batchgröße, Auswertungsintervall und Seed. Das letzte Argument `medium` wählt GPT-2 Medium. Der veröffentlichte Checkpoint ist über Git LFS abrufbar und umfasst **1.419.292.972 Byte**. Seine SHA-256-Prüfsumme steht im Versuchsprotokoll. Bei einem eigenen Trainingslauf können parallele Fließkommaadditionen in anderer Reihenfolge ablaufen. Dann können sich trotz desselben Seeds einzelne Gewichte und damit auch die Prüfsumme ändern. [Checkpoint](../../results/gpt2-medium-355m/best.nfg) · [Prüfsumme und Konfiguration](../../results/gpt2-medium-355m/run.json)
 
 ~~~powershell
 git lfs pull --include="results/gpt2-medium-355m/best.nfg"
 Get-FileHash -Algorithm SHA256 results/gpt2-medium-355m/best.nfg
 ~~~
 
-Die veröffentlichte Abbildung und die Animation lassen sich aus den CSV-Dateien neu zeichnen. Das GIF spielt die Messpunkte ungefähr doppelt so schnell wie im Versuch ab und hält am Ende zwei Sekunden an. In welchem Zeitabschnitt entsteht der größte Teil des Anstiegs? Zwischen 6,34 und 6,55 Sekunden springt die Belegung von 1.643 auf 8.051 MiB.
+Das Plot-Skript zeichnet die veröffentlichte Abbildung aus den beiden CSV-Dateien. Im GIF laufen die Messpunkte etwa doppelt so schnell wie im Versuch durch, mit zwei Sekunden Pause am Ende. Wann entsteht der größte Teil des Anstiegs? Zwischen 6,34 und 6,55 Sekunden springt die Belegung von 1.643 auf 8.051 MiB. [Skript zur Abbildung](../../tools/plot_medium_memory.py)
 
 ~~~powershell
 & $py tools/plot_medium_memory.py
 & $py tools/plot_medium_memory.py --out results/gpt2-medium-355m/memory.gif
 ~~~
 
-## Kontrollfrage
+## Wie viel Speicher braucht ein doppelt so langes Fenster?
 
-Verdopple gedanklich die Fensterlänge von 128 auf 256 bei unveränderter Batchgröße vier. Welcher Teil der 6,25 GiB bleibt konstant? Welcher wächst auf das Vierfache?
+Die Batchgröße bleibt bei vier, die Fensterlänge steigt von 128 auf 256 Tokens. Welcher Teil der 6,25 GiB bleibt gleich, welcher verdoppelt und welcher vervierfacht sich?
 
 <details>
-<summary>Rechnung und Grenze der Aussage</summary>
+<summary>Speicherrechnung für 256 und 1.024 Positionen</summary>
 
-Alle 354.823.168 Parameter behalten ihren Platz, ebenso Gradienten und Adam-Momente. Diese 5,2873 GiB bleiben konstant. Die Logits verdoppeln sich mit der Anzahl der Positionen. Das Attention-Feld pro Block wächst wie $T^2$, denn jede Query-Position hat eine Achse über alle möglichen Keys. Es wächst von 4 auf 16 MiB. Setzt man alle Puffergrößen in die aktuelle Reservierungsformel ein, ergeben sich bei $T=256$ insgesamt rund **7,42 GiB** an expliziten Puffern. Bei $T=1\,024$ wären es rund **18,49 GiB**. Beides sind Rechnungen für diesen Trainer und diese Batchgröße. Der hier tatsächlich ausgeführte Lauf hatte $T=128$.
+Die 354.823.168 Gewichte, ihre Gradienten und die beiden Adam-Momente benötigen weiterhin 5,2873 GiB. In den vier Fenstern gibt es nun doppelt so viele Positionen und damit doppelt so viele Logits. Das Attention-Feld wächst dagegen in beiden Richtungen. Bei doppelt so vielen Queries und Keys steigt sein Bedarf je Block von 4 auf 16 MiB.
+
+Setzt man $T=256$ in die Reservierungsformel des Trainers ein, ergeben sich für beide Puffer zusammen rund **7,42 GiB**. Bei $T=1\,024$ wären es **18,49 GiB**. Beides sind Vorhersagen für diesen Trainer bei $B=4$. Der Messwert von 6,25 GiB gehört zum Lauf mit $T=128$.
 
 </details>
 

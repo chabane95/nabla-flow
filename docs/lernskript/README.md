@@ -1,31 +1,26 @@
-# Wie lernt ein Sprachmodell, welches Fach gemeint ist?
+# Vom nächsten Byte zu GPT-2
 
-Ein Lernskript zu **nabla-flow**. Für den Einstieg genügen bedingte Wahrscheinlichkeiten, die Ableitung einer Funktion und das Skalarprodukt zweier Vektoren. Die Rechnungen beginnen auf Papier. Für den praktischen Teil reichen ein C-Compiler und die kleinen, im Repository enthaltenen Modellgewichte.
+Im Testprotokoll steht `Fach A: Glas. Fach B: Harz.` Zu dieser Belegung gibt es zwei Fragen. Der gespeicherte Decoder mit 35.776 Parametern gibt bei beiden dieselbe Antwort.
 
-> **Der erste Versuch.** In Fach A liegt Glas, in Fach B liegt Harz. Ergänze „In A liegt …“ und „In B liegt …“. Unterstreiche für jede Antwort die zwei Stellen im Text, die du miteinander verbinden musst. Welche Information hätte jemand, der vor der Antwort nur das letzte Leerzeichen sehen dürfte?
-
-Genau dieses Experiment steckt im Datensatz. Beim Prompt `Fach A: Glas. Fach B: Harz. In B liegt ` erzeugt das gespeicherte Byte-Modell `Glas.`. Über den gesamten Test erreicht es trotzdem eine Perplexität von 1,270. Um beides zu verstehen, brauchen wir zwei verschiedene Messungen am selben Modell. Der eine Versuch fragt, wie viel Wahrscheinlichkeit das Modell jedem nächsten Byte gibt. Der andere fragt, ob beim selbstständigen Antworten das richtige Wort bis einschließlich Punkt entsteht. [Testmessung](../../results/test.csv) · [Antwortaufgaben](../../data/recall.tsv) · [Gespeicherte Beispielantwort](../../results/sample.txt)
-
-## Der Rechenweg
-
-| Kapitel | Frage | Was du am Ende selbst prüfen kannst |
+| Satzanfang | Erwartete Fortsetzung | Ausgabe des Modells |
 | --- | --- | --- |
-| [1 · Vom Text zur messbaren Vorhersage](01-vorhersage.md) | Wie wird aus einer Zeile Text eine Reihe von Wahrscheinlichkeitsaussagen? | Zielsequenz aufschreiben, eine Bigramm-Tabelle aus Zählungen bestimmen und ihren Verlust in Nats berechnen. |
-| [2 · Wie der Decoder früheren Text nutzt](02-transformer.md) | Wie kann derselbe letzte Buchstabe je nach Vorgeschichte eine andere Prognose auslösen? | Eine Attention-Zeile von Hand ausrechnen, die kausale Grenze einzeichnen und die Modellparameter zählen. |
-| [3 · Wie ein Fehler ein Gewicht verändert](03-lernen.md) | Wie kommt der Fehler für `H` oder `G` bis zu einem Gewicht, das beim Lesen des Fachnamens benutzt wurde? | Den Gradienten entlang der Rechenwege herleiten und sein Vorzeichen sowie seine Größe mit einem Differenzenquotienten prüfen. |
-| [4 · Experimente mit den gespeicherten Modellen](04-labor.md) | Welche Eigenschaft weist ein bestandener Test nach? | Kausalität, Vorhersagegüte und exakte Antworten getrennt messen und die Shakespeare-Messungen mit der passenden Kontrollrechnung vergleichen. |
-| [5 · Das Antwortwort vierfach gewichten](05-antwortgewicht.md) | Hilft eine geänderte Zielfunktion beim Wechsel der Frage? | Zwei Trainingsläufe mit identischen Startgewichten wiederholen und Doppeltreffer auf denselben Belegungen zählen. |
-| [6 · Modellgröße, GPT-2 und GPT-3](06-modellgroesse.md) | Was trennt das kleine Experiment vom Training eines großen Sprachmodells? | Die Parameter zählen und aus dem Trainingsbudget und Speicherbedarf ableiten, was auf einer einzelnen GPU möglich ist. |
-| [7 · GPT-2 Medium auf der RTX 4070 SUPER](07-gpt2-medium.md) | Wie viel Grafikspeicher braucht ein echter Trainingsschritt bei 355 Millionen Parametern? | Den Speicherbedarf aus der Modellform berechnen und mit Messungen des CUDA-Treibers und der gesamten Karte vergleichen. |
+| `In A liegt …` | `Glas.` | `Glas.` |
+| `In B liegt …` | `Harz.` | `Glas.` |
 
-Bearbeite Kapitel 1 und 2 mit einem Blatt Papier. Für Kapitel 3 lohnt es sich, in den eigenen Formeln jedes mehrfach verwendete Gewicht zu markieren. Im Labor schreibe vor dem Start des Programms einen Satz der Form „Wenn meine Erklärung stimmt, muss sich bei diesem Eingriff … ändern“ und daneben ein Ergebnis, das dich zum Umdenken bringen würde.
+Bei der ersten Frage könnte das Modell das richtige Fach gefunden oder schlicht das erste Material wiederholt haben. Erst die zweite Frage unterscheidet diese Erklärungen für diese Belegung. Über den gesamten Testsatz stimmen 26 von 56 Antworten. Zugleich erreicht dieses Modell eine Perplexität von 1,270. Wie passen die beiden Ergebnisse zusammen? [Testfragen](../../data/recall.tsv) · [Antwortwertung](../../results/recall.csv) · [Verlust und Perplexität](../../results/test.csv)
 
-## Den Versuch jemandem erklären
+Der Verlust mittelt über alle Zielpositionen. Bekommt der Punkt am Satzende eine hohe Wahrscheinlichkeit, trägt er wenig zum Mittelwert bei. Für einen Treffer muss hingegen das ganze Wort samt Punkt stimmen. Bei der zweiten Frage genügt schon das erste `G` anstelle des `H`, damit die Antwort als falsch zählt. Was ändert sich, wenn beim Training jedes Byte des Antwortworts vierfach zählt? Dieser Versuch steht in Kapitel 5.
 
-Zeige einer zweiten Person eine richtige Antwort des Fachmodells. Welche zweite Frage würde sie stellen, um herauszufinden, ob das Modell das richtige Fach erkannt hat? In Kapitel 5 kannst du für dieselbe Belegung beide Antworten nachsehen. [Versuch mit Gegenfragen](05-antwortgewicht.md)
+## Kapitel
 
-## Beim Lesen des Codes
+| Kapitel | Rechnung oder Versuch |
+| --- | --- |
+| [1 · Vorhersage und Verlust](01-vorhersage.md) | Aus gezählten Byte-Paaren eine Wahrscheinlichkeit bestimmen. Was kostet es, wenn das beobachtete Byte nur Wahrscheinlichkeit ¼ hatte? |
+| [2 · Der Vorwärtslauf](02-transformer.md) | Für eine Position aus Query und Keys die Attention-Gewichte berechnen. |
+| [3 · Die Ableitung nach einem Gewicht](03-lernen.md) | Den Gradienten durch den Decoder verfolgen und mit einer kleinen Änderung eines Gewichts numerisch prüfen. |
+| [4 · Messungen am trainierten Modell](04-labor.md) | Beide Fachfragen an den gespeicherten Decoder stellen und die Antworten mit dem Verlust derselben Testdaten vergleichen. |
+| [5 · Vierfaches Gewicht für das Antwortwort](05-antwortgewicht.md) | Bei gleichen Startgewichten messen, welche Farb- und Materialbelegungen das Modell nach 1.800 Updates vollständig löst. |
+| [6 · Vom Byte-Modell zu GPT-2](06-modellgroesse.md) | Parameter zählen und den Speicher für Gewichte, Gradienten und Optimierer berechnen. |
+| [7 · GPT-2 Medium auf der RTX 4070 SUPER](07-gpt2-medium.md) | Die Speicherrechnung für 355 Millionen Parameter mit der gemessenen Belegung der Grafikkarte vergleichen. |
 
-Die kleinste vollständige Schleife für das Byte-Modell steht in `train`. Verfolge dort einen einzigen Block. `x` zeigt auf das erste Eingabetoken, `x+1` auf die verschobenen Ziele. `gpt_forward` berechnet die Scores für alle Positionen, `gpt_backward` sammelt die Beiträge zum Gradienten und `gpt_step` aktualisiert nach mehreren Blöcken die Gewichte. Folge beim ersten Durchgang nur diesen vier Stellen. Die Reihenfolge, in der das Programm rechnet, ist dieselbe wie im Skript. [Trainingsschleife](../../src/main.c) · [Schnittstelle mit Konventionen für Summen und Mittelwerte](../../src/gpt.h)
-
-Die mathematische Herleitung führt von der Ableitung einer Funktion zur Kettenregel auf einem Rechengraphen. Zur anschließenden Lektüre eignen sich Abschnitt 3.2 von Vaswani et al. für Attention, Abschnitt 2 von Radford et al. für das autoregressive Modell und die Arbeit von Loshchilov und Hutter für den Optimierungsschritt. [Mathematische Grundlagen](../../latex/backprop_first_principles.tex) · [Attention Is All You Need](https://arxiv.org/abs/1706.03762) · [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) · [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101)
+Die Herleitungen setzen bedingte Wahrscheinlichkeit, Skalarprodukt und Kettenregel voraus. Die Versuche am Byte-Modell laufen mit einem C11-Compiler auf der CPU. Für den Vergleich in Kapitel 7 stehen die Messwerte des GPU-Laufs als CSV bereit. [Mathematische Grundlagen](../../latex/backprop_first_principles.tex) · [GPU-Messreihe](../../results/gpt2-medium-355m/board-memory.csv)

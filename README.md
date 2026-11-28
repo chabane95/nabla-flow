@@ -10,9 +10,15 @@
 - Ich wollte den Weg von einer falschen Vorhersage bis zur Änderung eines einzelnen Gewichts auf Papier nachvollziehen und die Ableitung im Code überprüfen.
 - Zwei Fragen ließen sich am eigenen Rechner testen. Lernt ein Modell die Zuordnung von Material und Fach? Wie viel Speicher brauchen Gewichte, Gradienten und Zwischenwerte bei einem vollständigen GPT-2-Trainingsschritt?
 
+## Was ist ein Parameter?
+
+- Ein Parameter ist eine im Modell gespeicherte Zahl, die sich beim Training ändern kann. Das einfachste Beispiel ist eine Gerade durch den Ursprung, $y=w x$. Hier hat das Modell genau einen Parameter, die Steigung $w$.
+- Angenommen, für die Eingabe $x=2$ soll das Ergebnis $1$ sein. Mit $w=0{,}3$ sagt das Modell $0{,}6$ voraus. Ändert das Training $w$ auf $0{,}4$, ergibt dieselbe Eingabe $0{,}8$. Mit $w=0{,}5$ trifft das Modell diesen Datenpunkt genau.
+- Im trainierten Byte-Modell hat jedes Eingabebyte eine Zeile mit 32 gelernten Zahlen. Die erste Zahl für `G` ist −0,0648, die für `H` ist +0,1039. Jede davon zählt als **ein** Parameter. Insgesamt hat dieses Modell **35.776**. [Gewichte aus dem Checkpoint](figures/byte-weights.svg)
+
 ## Lernskript
 
-- [Wie lernt ein Sprachmodell, welches Fach gemeint ist?](docs/lernskript/README.md)
+- [Vom nächsten Byte zu GPT-2](docs/lernskript/README.md)
 
 ## GPT-2 Medium · RTX 4070 SUPER
 

@@ -1,14 +1,14 @@
 # 2 · Wie greift eine Vorhersage auf frühere Tokens zu?
 
-Stell dir zwei Laborprotokolle vor. Im ersten steht »Fach A: Glas. Fach B: Harz.«, im zweiten sind die Materialien vertauscht. Beide enden mit »In B liegt «. Ein Bigramm sieht in beiden Fällen dasselbe letzte Leerzeichen. Es muss den nächsten Bytes dieselbe Verteilung geben. Wer im ersten Fall ein **H** und im zweiten ein **G** vorhersagen will, braucht einen Rechenweg vom früheren Eintrag zur aktuellen Position. Welche Eigenschaften muss dieser Weg haben?
+In der ersten Zeile steht `Fach A: Glas. Fach B: Harz. In B liegt `, in der zweiten sind Glas und Harz vertauscht. Auf dieselbe Frage müsste einmal `H`, einmal `G` folgen. Das Bigramm verwendet in beiden Fällen die Tabellenzeile für das letzte Leerzeichen. Wie kann der frühere Eintrag über Fach B die Verteilung an dieser Stelle verändern?
 
-Er muss frühere Informationen an die passende Stelle bringen, zwischen mehreren Fundstellen unterscheiden und bei der Vorhersage das gesuchte Byte geheim halten. Die letzte Forderung folgt unmittelbar aus der Aufgabe. Für die ersten beiden wählt das Projekt einen lernbaren Mechanismus, die **kausale Selbstaufmerksamkeit**. Wir bauen ihn so auf, dass sich jede dieser Eigenschaften an einer Rechnung prüfen lässt.
+Im Decoder erhält jede Position einen Zustandsvektor. Die **kausale Selbstaufmerksamkeit** (*causal self-attention*) mischt an der fraglichen Position Beiträge aus dem bisher gelesenen Text. Für die Rechnung sind zwei Entscheidungen auseinanderzuhalten. Welche Beiträge überhaupt zulässig sind, bestimmt ihre Position. Wie stark ein zulässiger Beitrag eingeht, hängt von den gelernten Gewichten und vom Text ab.
 
 ## Vom Token zum Zustand
 
 Ein Fenster enthält die Token-IDs $u_0,\ldots,u_{T-1}$. An Position $t$ soll der Decoder eine Verteilung für $u_{t+1}$ liefern. $V$ ist die Vokabulargröße, $C$ die maximale Fensterlänge, $d$ die Breite eines Zustands. Es gilt $T\le C$. Alle Zustände einer einzelnen Position schreiben wir als Spaltenvektoren. Eine Gewichtsmatrix hat eine Zeile je Ausgabekomponente, genau wie bei der C-Funktion `dense`.
 
-Eine Token-ID dient als Index. Die Nummer 76 für das Byte `L` sagt nichts darüber aus, welche Buchstaben im Deutschen ähnliche Rollen spielen. Wir könnten die ID als Einheitsvektor $e_{u_t}\in\mathbb R^V$ kodieren und mit einer gelernten Matrix multiplizieren. Dabei überlebt genau eine Zeile der Tokentabelle $E\in\mathbb R^{V\times d}$. Der Code liest diese Zeile direkt. Hinzu kommt die Zeile $t$ einer zweiten gelernten Tabelle $P\in\mathbb R^{C\times d}$ für die Position im Fenster. Der Anfangszustand ist damit
+Die ID 76 bezeichnet das Byte `L`. Der Decoder verwendet diese Zahl als Index in der gelernten Tokentabelle $E\in\mathbb R^{V\times d}$. Algebraisch wählt der Einheitsvektor $e_{u_t}\in\mathbb R^V$ genau die Zeile mit Index $u_t$ aus. Zu dieser Zeile kommt die Zeile $t$ der gelernten Positionstabelle $P\in\mathbb R^{C\times d}$. Als Spaltenvektor geschrieben ergibt das
 
 $$
 x_t^{(0)}=E^\top e_{u_t}+P^\top e_t.
@@ -16,9 +16,9 @@ $$
 
 Der Einheitsvektor $e_t$ hat hier $C$ Komponenten. Zwei Vorkommen von `B` teilen sich den Tokenanteil und erhalten an unterschiedlichen Stellen verschiedene Positionsanteile. Die Addition ist eine Architekturentscheidung. Sie lässt die Breite $d$ unverändert. [Einbettung in `gpt_forward`](../../src/gpt.c#L274-L293)
 
-## Aus Ähnlichkeit wird eine Leserichtung
+## Welche Position erhält welches Gewicht?
 
-Angenommen, jede Position könnte nur den Mittelwert aller bisherigen Zustände lesen. Dann hätten eine passende und fünf unpassende Fundstellen zunächst dasselbe Gewicht. Wir suchen einen **gewichteten** Mittelwert, dessen Gewichte von der aktuellen Frage und den verfügbaren Fundstellen abhängen. Dazu erzeugt ein Kopf aus dem normierten Zustand $r_t$ drei Vektoren. Wie $r_t$ entsteht, rechnen wir weiter unten aus.
+Ein ungewichteter Mittelwert gäbe jedem bisherigen Eintrag denselben Koeffizienten. Um bei verschiedenen Fragen andere Fundstellen gewichten zu können, berechnet ein Attention-Kopf drei Projektionen. Dabei bezeichnet $r_j$ den normierten Zustand an Position $j$. Die Rechnung für diese Normierung steht im Abschnitt über den Decoderblock.
 
 $$
 q_t=W_Qr_t+b_Q,\qquad
@@ -26,36 +26,36 @@ k_j=W_Kr_j+b_K,\qquad
 v_j=W_Vr_j+b_V.
 $$
 
-Die **Query** $q_t$ beschreibt, wonach Position $t$ sucht. Der **Key** $k_j$ beschreibt, bei welchen Anfragen Position $j$ Gewicht bekommen soll. Der **Value** $v_j$ enthält die Information, die sie dann beiträgt. Drei getrennte Projektionen erlauben beispielsweise, nach einer Fachbezeichnung zu suchen und eine Information über das Material zu übertragen. Ob ein trainierter Kopf eine solche Zuordnung tatsächlich lernt, muss man messen. Die drei Projektionen bekommen an allen Positionen dieselben Gewichte.
+Die **Query** $q_t$ und der **Key** $k_j$ bestimmen gemeinsam das Gewicht für die Verbindung von $j$ nach $t$. Der **Value** $v_j$ ist der Vektor, der mit diesem Gewicht übertragen wird. So können verschiedene Komponenten für die Wahl der Fundstelle und für die von dort übernommene Information zuständig sein. Alle Positionen eines Kopfes verwenden dieselben drei Matrizen und Biasvektoren. Ob sich ein Kopf im Fachversuch tatsächlich an einer bestimmten Fachbezeichnung orientiert, ist eine empirische Frage.
 
-Mit $H$ Köpfen ist die Breite eines Kopfes $d_h=d/H$. Jede der drei Matrizen eines Kopfes hat die Form $d_h\times d$. Das Skalarprodukt $q_t^\top k_j$ liefert eine Zahl pro möglicher Fundstelle. Ohne Bias wäre sie $r_t^\top W_Q^\top W_K r_j$. Schon diese Form zeigt, warum die gesuchte Beziehung eine Richtung haben kann. Die gelernte Matrix $W_Q^\top W_K$ braucht keine Symmetrie zu besitzen.
+Für $H$ Köpfe hat jede Projektion eines Kopfes $d_h=d/H$ Ausgänge und somit eine Matrix der Größe $d_h\times d$. Das Skalarprodukt $q_t^\top k_j$ vergleicht Query und Key. Ohne Bias lautet es $r_t^\top W_Q^\top W_K r_j$. Die Matrix $W_Q^\top W_K$ kann asymmetrisch sein. Das Vertauschen der beiden Positionen kann daher sogar vor Anwendung der Maske einen anderen Score ergeben.
 
 ![Trainierte Gewichte des Fachmodells. Oben stehen die 32 Koordinaten für acht Byte-IDs, unten die acht Zeilen der Query-Matrix des ersten Kopfes im ersten Block.](../../figures/byte-weights.png)
 
-Beide Ausschnitte verwenden dieselbe symmetrische Farbskala von $-0{,}55$ bis $+0{,}55$. Jede Zelle zeigt einen dimensionslosen FP32-Parameter. Acht ausgewählte Bytes füllen Panel (a), alle acht Query-Komponenten eines Kopfes füllen Panel (b). [Vektoransicht](../../figures/byte-weights.svg) · [Druckfassung](../../figures/byte-weights.pdf) · [Plot aus dem Checkpoint erzeugen](../../tools/plot_byte_weights.py)
+Die Abbildung zeigt Parameter des Fachmodells beim Validierungsminimum des 1×-Laufs (Update 1.000). Oben stehen die 32 Koordinaten von acht ausgewählten Byte-IDs, unten die acht Zeilen der Query-Matrix des ersten Kopfes im ersten Block. Jede Zelle ist ein gespeicherter, dimensionsloser FP32-Parameter. Beide Matrizen verwenden die Farbskala von $-0{,}55$ bis $+0{,}55$. [Vektoransicht](../../figures/byte-weights.svg) · [Druckfassung](../../figures/byte-weights.pdf) · [Plot aus dem Checkpoint erzeugen](../../tools/plot_byte_weights.py)
 
-In der oberen Matrix kannst du die Zeile für `G` lesen. Der Eintrag in Spalte 0 beträgt rund $-0{,}065$. In der unteren Matrix ergibt jede Zeile durch ihr Skalarprodukt mit dem normierten Zustand und Addition des zugehörigen Bias eine der acht Query-Komponenten. Die Grafik zeigt gespeicherte Parameter des trainierten Fachmodells. Erst beim Lesen eines konkreten Textes entstehen daraus Queries und Keys für die einzelnen Positionen. [Gewichte des Fachmodells](../../results/model.nfg)
+Für `G` beträgt die erste Koordinate in der Tokentabelle rund $-0{,}065$. Die untere Matrix dient einer anderen Rechnung. Das Skalarprodukt ihrer ersten Zeile mit $r_t$, zuzüglich des ersten Biaswerts, liefert die erste Query-Komponente. Auch wenn `G` an zwei Stellen denselben Tabelleneintrag hat, können sich die Queries unterscheiden, weil die Positionsvektoren in $r_t$ eingehen. [Gewichte des Fachmodells](../../results/model.nfg)
 
-Warum teilen wir das Skalarprodukt durch $\sqrt{d_h}$? Nimm als Überschlagsrechnung unabhängige, zentrierte Query- und Key-Komponenten mit Varianz eins an. Dann hat jedes Produkt $q_{t,i}k_{j,i}$ Varianz eins. Addiert man $d_h$ unabhängige Produkte, erhält die Summe Varianz $d_h$, ihre Standardabweichung wächst also wie $\sqrt{d_h}$. Der folgende Score hält die typische Größenordnung unter dieser Annahme konstant. Sonst könnte allein eine breitere Darstellung Softmax stärker auf den größten Wert zuspitzen. Für gelernte Komponenten ist die Unabhängigkeit eine Näherung.
+Warum steht im Score der Faktor $1/\sqrt{d_h}$? Als Überschlagsrechnung seien die Query- und Key-Komponenten unabhängig, zentriert und von Varianz eins. Dann hat jedes Produkt $q_{t,i}k_{j,i}$ Erwartungswert null und Varianz eins. Die Summe über $d_h$ unabhängige Produkte hat Varianz $d_h$. Division durch ihre Standardabweichung $\sqrt{d_h}$ hält die typische Scoregröße beim Ändern der Kopfbreite konstant. Die Annahme der Unabhängigkeit dient dieser Abschätzung. Im trainierten Modell können die Komponenten korreliert sein.
 
 $$
 s_{tj}=\frac{q_t^\top k_j}{\sqrt{d_h}},\qquad 0\le j\le t.
 $$
 
-Die Beschränkung $j\le t$ folgt aus dem Vorhersagezeitpunkt. Bei $j=t+1$ läge bereits das Ziel vor. Die eigene Position $j=t$ ist erlaubt, denn $u_t$ ist bekannt. In C endet die Schleife über die Keys bei `j <= t`. [Projektion und kausale Attention im CPU-Code](../../src/gpt.c#L245-L301)
+Die Beschränkung $j\leq t$ ist die kausale Maske. Das Token $u_t$ ist bei der Vorhersage bekannt. Die Position $t+1$ enthält bereits das gesuchte Ziel. In der C-Implementierung endet die Schleife über die Keys bei `j <= t`. [Projektion und kausale Attention im CPU-Code](../../src/gpt.c#L245-L301)
 
-## Warum ergibt sich aus den Scores ein Softmax?
+## Wie werden aus Scores Mischungsgewichte?
 
-Die Mischung $o_t=\sum_{j=0}^{t}a_{tj}v_j$ soll bei identischen Values wieder genau diesen Value liefern. Das gelingt, wenn sich die Gewichte zu eins summieren. Mit $a_{tj}\geq 0$ liegt das Ergebnis zwischen den angebotenen Values, genauer in ihrer konvexen Hülle. Wie verteilen wir die Masse? Ein hoher mittlerer Score soll sich lohnen. Zugleich sollen mehrere plausible Quellen Gewicht erhalten können.
+Der Kopf liefert $o_t=\sum_{j=0}^{t}a_{tj}v_j$. Sind alle $v_j$ gleich, soll $o_t$ ihren gemeinsamen Wert wiedergeben. Dafür müssen sich die Gewichte zu eins summieren. Mit $a_{tj}\geq0$ bleibt $o_t$ in der konvexen Hülle der Values. Diese Bedingungen allein lassen viele Verteilungen zu.
 
-Dafür können wir für eine Zeile die Gewichte $a_j$ so wählen, dass **mittlerer Score plus Entropie** maximal wird. Die relative Gewichtung beider Terme setzen wir auf eins. Dies ist eine Wahl des Modells. Wir berücksichtigen $\sum_j a_j=1$ mit einem Lagrange-Multiplikator $\lambda$. Alle Summen laufen nur über die erlaubten Positionen.
+Eine Herleitung der Softmax gewichtet zwei Größen. Für die Zeile $t$ sei $a_j=a_{tj}$. Der erste Term ist der mittlere Score $\sum_j a_j s_{tj}$. Er wäre maximal, wenn alle Masse auf einer Position mit höchstem Score läge. Der zweite Term, die Entropie $-\sum_j a_j\ln a_j$, erreicht ihr Maximum bei Gleichverteilung. Bei gleichem Vorfaktor beider Terme und der Nebenbedingung $\sum_j a_j=1$ lautet die zu maximierende Funktion
 
 $$
 F(a,\lambda)=\sum_j a_j s_{tj}-\sum_j a_j\ln a_j
                 +\lambda\left(1-\sum_j a_j\right).
 $$
 
-Am Maximum gilt $0=\partial F/\partial a_j=s_{tj}-\ln a_j-1-\lambda$. Also ist $a_j$ proportional zu $\exp(s_{tj})$. Die zweite Ableitung des Entropieterms nach $a_j$ ist $-1/a_j<0$. Die Normierung legt das eindeutige Maximum fest. Das Programm berechnet die Lösung direkt.
+Im Inneren des zulässigen Bereichs gilt $0=\partial F/\partial a_j=s_{tj}-\ln a_j-1-\lambda$ und damit $a_j\propto\exp(s_{tj})$. Der Entropieterm ist streng konkav ($\partial^2 F/\partial a_j^2=-1/a_j$). Die normierte Lösung ist folglich das eindeutige Maximum. Für die Rechnung wird das Zeilenmaximum $M_t$ abgezogen.
 
 $$
 a_{tj}=\frac{\exp(s_{tj}-M_t)}{\sum_{i=0}^{t}\exp(s_{ti}-M_t)},
@@ -66,7 +66,7 @@ Das Abziehen von $M_t$ kürzt denselben Faktor aus Zähler und Nenner. Der grö�
 
 ### Eine Zeile von Hand
 
-An Position $t=1$ eines Fensters mit drei Tokens wählen wir in einem einzelnen Kopf $d_h=2$ und $q_1=(\sqrt{2},0)^\top$. Die Zahlen sind zum Rechnen gewählt. Sie beschreiben den Zustand **nach** der Projektion.
+An Position $t=1$ eines Fensters mit drei Tokens sei $d_h=2$ und $q_1=(\sqrt{2},0)^\top$. Die Tabelle enthält konstruierte Keys und Values nach der Projektion. Welche Zeilen gehen in den Nenner der Softmax ein?
 
 | Position $j$ | Key $k_j$ | Value $v_j$ | Score für $q_1$ | Gewicht |
 | --- | --- | --- | --- | --- |
@@ -80,13 +80,13 @@ $$
 o_1=\tfrac14(2,0)^\top+\tfrac34(0,4)^\top=(1/2,3)^\top.
 $$
 
-**Gedankenexperiment.** Vergrößere den ersten Eintrag von $k_2$ auf eine Million. Der ausgerechnete Vektor bleibt $(1/2,3)^\top$. Genau daraus folgt ein Test für den gesamten Decoder. Token- und Positionsvektoren des festen Präfixes bleiben identisch. Jede Attention-Zeile dieses Präfixes liest nur daraus. Alle übrigen Operationen wirken je Position. Das Argument gilt nach jedem weiteren Block wieder. Der CPU-Selbsttest ändert in einer Fünferfolge die beiden letzten IDs und vergleicht alle früheren Logits bitweise. Er prüft auch den auf drei IDs abgeschnittenen Präfix. [Kausalitätstest](../../src/gpt.c#L577-L602)
+Was geschieht, wenn die erste Komponente von $k_2$ auf eine Million steigt? Das Ergebnis bleibt $(1/2,3)^\top$, denn in dieser Zeile fehlt $j=2$ bereits in der Summe. Dasselbe Argument gilt für einen ganzen Decoder. Ändert sich nur der Text hinter einem festen Präfix, bleiben die Eingangsvektoren des Präfixes gleich. Jede seiner Attention-Zeilen liest ausschließlich aus diesem Bereich. Die übrigen Operationen wirken an jeder Position einzeln. Damit gilt die Aussage nach jedem weiteren Block. Der CPU-Selbsttest ersetzt in einer Fünferfolge die letzten zwei IDs und vergleicht die ersten drei Logit-Vektoren bitweise. Er wiederholt den Vergleich nach Kürzen auf die ersten drei IDs. [Kausalitätstest](../../src/gpt.c#L577-L602)
 
-## Wie baut das Projekt aus Köpfen einen Decoderblock?
+## Der Decoderblock
 
-Mehrere Köpfe dürfen für dieselbe Query-Position unterschiedliche Gewichtsverteilungen bilden. Wir hängen ihre $d_h$-dimensionalen Ergebnisse aneinander. Die Gesamtlänge ist $Hd_h=d$. Eine gelernte Matrix $W_O\in\mathbb R^{d\times d}$ mischt die Komponenten. Im Speicher bildet der Code alle Queries, Keys und Values eines Tokens mit einer einzigen Projektion $d\to 3d$ und greift für jeden Kopf auf den zugehörigen Ausschnitt zu. [Gewichtsanordnung](../../src/gpt.c#L41-L61) · [Attention-Schleifen](../../src/gpt.c#L245-L272)
+Jeder Kopf berechnet für die Position $t$ seine eigene Verteilung über die lesbaren Stellen. Das Aneinanderfügen der Kopfvektoren liefert $Hd_h=d$ Komponenten. Die Ausgangsmatrix $W_O\in\mathbb R^{d\times d}$ mischt diese Komponenten. Im C-Code sind die Q-, K- und V-Matrizen aller Köpfe zu einer Projektion $d\to 3d$ zusammengefasst. Jeder Kopf liest daraus seinen Ausschnitt. [Gewichtsanordnung](../../src/gpt.c#L41-L61) · [Attention-Schleifen](../../src/gpt.c#L245-L272)
 
-Was passiert vor den Projektionen? Bei jeder Position kann der Zustand im Verlauf des Trainings seine Größenordnung verändern. Eine **LayerNorm** misst Mittelwert und Varianz über die $d$ Komponenten **dieser einen Position**. Für den Vektor $x$ gilt
+Vor den Projektionen nimmt der Decoder für jede Position getrennt eine **LayerNorm** vor. Sie bestimmt Mittelwert und Varianz über die $d$ Komponenten des dortigen Zustandsvektors $x$. Es gilt
 
 $$
 \mu=\frac1d\sum_i x_i,\qquad
@@ -96,7 +96,7 @@ $$
 
 Eine gemeinsame additive Verschiebung aller Komponenten fällt durch die Subtraktion von $\mu$ weg. Bei $x=(1,3)^\top$ erhält man $\mu=2$ und $\sigma^2=1$. Mit $\gamma=(1,1)^\top$ und $\beta=(0,0)^\top$ ergibt sich näherungsweise $(-1,1)^\top$. Ein konstanter Eingangsvektor hat Varianz null und liefert dank des kleinen positiven Terms genau $\beta$. Die lernbaren Parameter $\gamma,\beta$ geben jeder Komponente wieder einen eigenen Maßstab und Nullpunkt. [LayerNorm auf der CPU](../../src/gpt.c#L216-L233)
 
-Für einen Block mit Eingang $x_t$ schreiben wir die beiden aufeinanderfolgenden Aktualisierungen aus. Die erste fügt jeder Position Informationen aus ihrem Präfix hinzu, die zweite verarbeitet die neuen Merkmale an dieser Position.
+Für einen Block mit Eingang $x_t$ ergeben sich zwei aufeinanderfolgende Änderungen. Zunächst geht die Mischung der Values aus dem Präfix in $m_t$ ein. Anschließend verarbeitet ein zweiter Zweig die Komponenten von $m_t$ an derselben Position.
 
 $$
 \begin{aligned}
@@ -110,7 +110,7 @@ $$
 
 Die eckige Klammer hängt die Kopfvektoren aneinander. Die Normalisierung steht jeweils **vor** der Verarbeitung durch den Zweig. Daher heißt diese Bauweise *Pre-LayerNorm*. Die beiden Additionen sind **Residualverbindungen**. Gibt ein Zweig den Nullvektor aus, steht sein Eingang für den nächsten Schritt weiterhin zur Verfügung.
 
-Der zweite Zweig ist ein kleines neuronales Netz (MLP). $W_1$ vergrößert die Breite von $d$ auf $4d$, $W_2$ verkleinert sie auf $d$. Zwei affine Abbildungen hintereinander ließen sich zu einer einzigen zusammenfassen. Die Nichtlinearität dazwischen erlaubt eine merkmalsabhängige Verarbeitung. GPT-2 wählt für jedes Skalarargument $a$ die Funktion GELU. Ihre Grundidee lässt sich mit einem Schwellenexperiment lesen. Sei $\xi$ standardnormalverteilt. Lässt man $a$ passieren, wenn $\xi\le a$, ergibt sich als Erwartungswert $a\,\Pr(\xi\le a)=a\Phi(a)$. Der Code verwendet dafür die deterministische Näherung
+Im zweiten Zweig erweitert $W_1$ den Vektor von $d$ auf $4d$ Komponenten. $W_2$ führt ihn auf $d$ Komponenten zurück. Zwei affine Abbildungen unmittelbar hintereinander ließen sich zu einer einzigen zusammenfassen. Zwischen ihnen wirkt deshalb eine nichtlineare Funktion auf jede Komponente des Zwischenvektors. GPT-2 verwendet GELU. Ihre Form lässt sich aus einem Schwellenversuch ablesen. Sei $\xi$ standardnormalverteilt. Wird $a$ für $\xi\le a$ und sonst null ausgegeben, beträgt der Erwartungswert $a\Pr(\xi\le a)=a\Phi(a)$. Der Code berechnet diesen Wert mit der Näherung
 
 $$
 \operatorname{GELU}(a)\approx \frac a2
@@ -129,7 +129,7 @@ p(u_{t+1}=k\mid u_0,\ldots,u_t)=
 \frac{\exp(z_{t,k})}{\sum_{v=0}^{V-1}\exp(z_{t,v})}.
 $$
 
-Die Attention normalisiert über **frühere und aktuelle Positionen**. Die Ausgabeverteilung normalisiert über **mögliche nächste Token-IDs**. So kann ein Attention-Gewicht von $0{,}75$ an einer Stelle zu einem beliebigen Ausgabetoken beitragen. Dafür sind auch Value, andere Köpfe, MLP und Ausgabematrix entscheidend.
+In diesem Decoder treten zwei verschiedene Softmax-Verteilungen auf. Die Attention verteilt für jede Query das Gewicht über die **lesbaren Positionen**. Die Ausgabe verteilt für jede Position die Wahrscheinlichkeit über die **möglichen nächsten Token-IDs**. Ein Attention-Gewicht von $0{,}75$ ist damit ein Koeffizient eines Value-Vektors. Bis zur Tokenwahrscheinlichkeit folgen unter anderem die Ausgangsprojektion, der zweite Residualzweig und die Multiplikation mit der Tokentabelle.
 
 Im CPU-Code erzeugt `gpt_forward` die Logits. `token_objective` wertet daraus die Kreuzentropie mit abgezogenem Zeilenmaximum aus. Die Ausgabeschicht hat keinen eigenen Bias. Die gemeinsame Matrix $E$ erhält beim Lernen Beiträge über ihren Eingangspfad und ihren Ausgangspfad. [Finale Normierung und Ausgabe](../../src/gpt.c#L307-L315) · [Berechnung der Zielfunktion](../../src/gpt.c#L410-L447)
 
@@ -143,11 +143,11 @@ Im CPU-Code erzeugt `gpt_forward` die Logits. `token_objective` wertet daraus di
 | Zwei LayerNorms pro Block, je Skala und Offset | $4d$ |
 | Finale LayerNorm | $2d$ |
 
-Damit ist $N=(V+C)d+L(12d^2+13d)+2d$. Beim deutschen Bytemodell ergeben $V=258$, $C=64$, $d=32$, $L=2$ genau **35.776**. Für GPT-2 Small ergeben $V=50\,257$, $C=1\,024$, $d=768$, $L=12$ genau **124.439.808**. Der große Lauf benutzt $T=128$ Positionen pro Trainingsfenster. Für die Parameterzahl zählt die Größe $C$ der angelegten Tabelle. Bei festem $d$ ändert eine andere zulässige Kopfzahl $H$ nur die Aufteilung der Projektionen. [Parameterzählung in C](../../src/gpt.c#L101-L113) · [Messprotokoll des Bytemodells](../../results/summary.csv) · [Konfiguration des großen Laufs](../training-124m.md)
+Die Summe lautet $N=(V+C)d+L(12d^2+13d)+2d$. Im Fachmodell mit $V=258$, $C=64$, $d=32$, $L=2$ entspricht das $10\,304+2\cdot12\,704+64=35\,776$ Parametern. Für GPT-2 Small mit $V=50\,257$, $C=1\,024$, $d=768$, $L=12$ ergeben sich **124.439.808**. Das Trainingsfenster des Small-Laufs umfasste nur $T=128$ Positionen. Für die Parameterzahl zählt die volle Tabelle mit $C=1\,024$ Zeilen. Bei festem $d$ beeinflusst die Kopfzahl nur die Aufteilung $Hd_h=d$. [Parameterzählung in C](../../src/gpt.c#L101-L113) · [Messprotokoll des Bytemodells](../../results/summary.csv) · [Konfiguration des großen Laufs](../training-124m.md)
 
-## Vom Papier zur Messung
+## Messung am gespeicherten Fachmodell
 
-**Versuch.** Welche Zahlen muss die Zeile zur ersten Position von `Links: rot.` zeigen, wenn der Decoder zuerst einen Startmarker einfügt? Welche Einträge können in der zweiten Zeile überhaupt von null verschieden sein? Lege dich fest und führe dann im Repository-Hauptverzeichnis den CPU-Befehl aus. Das verwendete Modell ist bereits mitgeliefert. [Bauanleitung für das CPU-Programm](../byte-models.md)
+Welche Werte sind in den ersten beiden Zeilen für `Links: rot.` bereits durch die Maske festgelegt? Der Decoder fügt zuerst den Startmarker ein. Der folgende Befehl gibt aus dem zweiten Block, ersten Kopf die ersten beiden Query-Zeilen bis einschließlich Key-Position 2 aus. Die Indizes im CPU-Programm beginnen bei null. Der Befehl läuft im Hauptverzeichnis des Repositorys. [Bauanleitung für das CPU-Programm](../byte-models.md)
 
 ~~~powershell
 .\nablaflow.exe inspect --model results/model.nfg --prompt "Links: rot." --layer 1 --head 0 |
@@ -155,18 +155,18 @@ Damit ist $N=(V+C)d+L(12d^2+13d)+2d$. Beim deutschen Bytemodell ergeben $V=258$,
     Format-Table query_pos,key_pos,weight
 ~~~
 
-**Auflösung.** Die erste Zeile muss vollständig auf dem Startmarker liegen. Die zweite darf nur den Startmarker und das Byte `L` lesen. Im zweiten Block, ersten Kopf (im Befehl ab null gezählt) meldet die gespeicherte Messung für diese beiden Quellen ungefähr $0{,}412516$ und $0{,}587484$. Ihre Summe ist bis auf Rundung eins. Das Verhältnis erlaubt sogar einen Rückschluss auf die **Differenz** der beiden Scores, $\ln(0{,}587484/0{,}412516)\approx0{,}354$. Eine gemeinsame Konstante in den Scores ist aus dieser Messung prinzipiell unbestimmbar. [Vollständige Attention-Zeilen](../../results/attention.csv) · [Grafische Ansicht](../../figures/attention.svg)
+In Zeile 0 liegt das Gewicht eins auf dem Startmarker. Alle späteren Keys sind gesperrt. In Zeile 1 sind BOS und `L` lesbar. Die Messung ergibt $a_{1,0}=0{,}412516$ und $a_{1,1}=0{,}587484$ (gerundet). Ihr Verhältnis liefert direkt die Differenz der Scores, $s_{1,1}-s_{1,0}=\ln(a_{1,1}/a_{1,0})\approx0{,}354$. Eine beiden Scores gemeinsame Konstante kürzt sich heraus. [Vollständige Attention-Zeilen](../../results/attention.csv) · [Grafische Ansicht](../../figures/attention.svg)
 
 [![Attention für den Prompt „Links: rot.“. Jede Zeile zeigt die Gewichte einer Query über die erlaubten früheren und aktuellen Positionen.](../../figures/attention.gif)](../../figures/attention.svg)
 
-Verfolge die erste, dann die zweite Zeile. Wo beginnt jeweils die Schraffur für zukünftige Bytes? Grau schraffierte Felder sind durch die Schleifengrenze ausgeschlossen. Mit jeder neuen Query entsteht eine weitere gemessene Zeile. [Standbild als PDF](../../figures/attention.pdf) · [Messung](../../results/attention.csv)
+Die Animation ergänzt für jedes weitere Byte eine gemessene Zeile. Die Schraffur beginnt in Zeile $t$ stets bei Spalte $t+1$. Die Felder davor zeigen, wie der Kopf sein Gewicht innerhalb des zulässigen Bereichs verteilt. [Standbild als PDF](../../figures/attention.pdf) · [Messung](../../results/attention.csv)
 
-Suche die Zeile zum Buchstaben `t` und fahre von links nach rechts. Ihr dunkelstes Feld liegt in der Spalte `o` unmittelbar davor. In den Messdaten beträgt dieses Gewicht $0{,}711$. Der Kopf übernimmt also an dieser Stelle rund 71 Prozent seiner Mischung aus dem Value-Vektor bei `o`. Um daraus eine Vorhersage für das nächste Zeichen zu berechnen, braucht man auch die Value-Vektoren und die folgenden Schichten. Die grauen Felder sind durch die kausale Maske ausgeschlossen. [Messdaten für diese Abbildung](../../results/attention.csv)
+Beim `t` von `rot` fällt das größte Gewicht auf das unmittelbar vorausgehende `o` ($a_{10,9}=0{,}711$). Der Value-Vektor am `o` geht also mit diesem Koeffizienten in die Summe $o_{10}$ ein. Um daraus eine Prognose für das nächste Byte zu berechnen, braucht man die Komponenten der Value-Vektoren und die nachfolgenden Schichten. [Messdaten für diese Abbildung](../../results/attention.csv)
 
-**Transferaufgabe.** Verdopple bei unverändertem $d$ die Anzahl der Köpfe, sofern $d$ durch die neue Kopfzahl teilbar ist. Wie ändern sich Kopfbreite, Parameterzahl und Anzahl der berechneten zulässigen Scores je Block in einem Fenster der Länge $T$?
+**Rechenaufgabe.** Bei fester Breite $d$ verdopple sich die Zahl der Köpfe von $H$ auf $2H$. Voraussetzung ist, dass $2H$ die Breite $d$ teilt. Wie ändern sich Kopfbreite, Parameterzahl und Zahl der zulässigen Scores je Block bei Fensterlänge $T$?
 
 **Lösung.** Die Kopfbreite halbiert sich. Jede der drei Projektionen behält über alle Köpfe hinweg $d$ Ausgänge, daher bleibt $N$ gleich. Ein Kopf benötigt $1+2+\cdots+T=T(T+1)/2$ zulässige Scores. Über alle Köpfe verdoppelt sich ihre Anzahl auf $2H\cdot T(T+1)/2$. Jedes einzelne Skalarprodukt verarbeitet dann halb so viele Komponenten.
 
-Wer die Rechenwege auf der GPU verfolgt, findet dieselbe Reihenfolge in `forward` in `src/gpu.c`. Die dichten Matrixprodukte laufen über cuBLAS. Im CUDA-Kernel `attention` bearbeitet ein Threadblock die Kombination aus **einer Sequenz, einer Query-Position und einem Kopf**. Im Batch kann daher jedes Beispiel nur seine eigene Sequenz lesen. Die unterschiedlichen Summationsreihenfolgen auf CPU und GPU machen numerische Toleranzen sinnvoll. Die projektinterne Paritätsprüfung vergleicht unter anderem Logits und Gradienten beider Pfade. [GPU-Vorwärtspfad](../../src/gpu.c#L376-L400) · [CUDA-Attention](../../src/gpu_kernels.cu#L108-L133) · [CPU/GPU-Paritätsprüfung](../../src/gpu.c#L479-L547)
+Auf der GPU führt `forward` dieselben Operationen aus. Die dichten Matrixprodukte laufen über cuBLAS. Im CUDA-Kernel `attention` bearbeitet ein Threadblock eine Kombination aus Sequenz, Query-Position und Kopf. Jedes Beispiel im Batch liest damit ausschließlich aus der eigenen Sequenz. CPU- und GPU-Summen können sich wegen ihrer Summationsreihenfolge geringfügig unterscheiden. Die Paritätsprüfung misst unter anderem die Abweichungen der Logits und Gradienten. [GPU-Vorwärtspfad](../../src/gpu.c#L376-L400) · [CUDA-Attention](../../src/gpu_kernels.cu#L108-L133) · [CPU/GPU-Paritätsprüfung](../../src/gpu.c#L479-L547)
 
-Was müsste man an den beiden Scores unserer Handrechnung ändern, damit die erste Komponente des Kopfvektors kleiner wird? Diese Frage eröffnet den Rückweg. [Weiter zu Kapitel 3](03-lernen.md) · [Übersicht](README.md)
+In der Handrechnung ist die erste Komponente von $o_1$ gleich $2a_{1,0}$. Wie müssen sich die beiden zulässigen Scores relativ zueinander ändern, damit diese Komponente kleiner wird? Kapitel 3 berechnet, wie ein Vorhersagefehler solche Änderungen über Gradienten auslöst. [Weiter zu Kapitel 3](03-lernen.md) · [Übersicht](README.md)
