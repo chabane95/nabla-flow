@@ -7,8 +7,12 @@
 
 ## Projektziel
 
-- Ich wollte den Weg von einer falschen Vorhersage bis zur Änderung eines einzelnen Gewichts auf Papier nachvollziehen und die Ableitung im Code überprüfen. [Lernskript](docs/lernskript/README.md)
+- Ich wollte den Weg von einer falschen Vorhersage bis zur Änderung eines einzelnen Gewichts auf Papier nachvollziehen und die Ableitung im Code überprüfen.
 - Zwei Fragen ließen sich am eigenen Rechner testen. Lernt ein Modell die Zuordnung von Material und Fach? Wie viel Speicher brauchen Gewichte, Gradienten und Zwischenwerte bei einem vollständigen GPT-2-Trainingsschritt?
+
+## Lernskript
+
+- [Wie lernt ein Sprachmodell, welches Fach gemeint ist?](docs/lernskript/README.md)
 
 ## GPT-2 Medium · RTX 4070 SUPER
 
@@ -77,8 +81,7 @@
 
 ## Quellen
 
-- **Selbstaufmerksamkeit und kausale Maske** · Vaswani et al. (2017), Abschnitt 3.2. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
-- **GPT-2-Architektur** · Radford et al. (2019), Abschnitt 2.3 und Tabelle 2. [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
-- **AdamW** · Loshchilov und Hutter (2019). [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101)
-- **Shakespeare-Trainingsdaten** · *Tiny Shakespeare*, Textfassung aus Andrej Karpathys `char-rnn`. [Verwendeter Datenstand](https://github.com/karpathy/char-rnn/blob/370cbcd448eb7daf32f21a6be560b70e0b33c4e3/data/tinyshakespeare/input.txt)
-- **Material- und Farbaufgaben** · im Projekt erzeugte Laborprotokolle. [Datengenerator](tools/corpus.c) · [Testbelegungen und Antworten](results/answer-weight/pairs.csv)
+- A. Vaswani et al. (2017). [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+- A. Radford et al. (2019). [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- I. Loshchilov & F. Hutter (2019). [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101)
+- A. Karpathy. [Tiny Shakespeare](https://github.com/karpathy/char-rnn/blob/370cbcd448eb7daf32f21a6be560b70e0b33c4e3/data/tinyshakespeare/input.txt)
